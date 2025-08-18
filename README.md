@@ -85,9 +85,10 @@ npm run clean
 
 ### Clean Mode Features:
 - **🚫 No Proxy**: Direct connection to website
+- **🔍 IP Health Check**: Analyzes your actual IP for risks
 - **⏱️ Rate Limited**: Automatic 15-minute cooldown between runs
 - **🔒 Anti-Spam Protection**: Prevents rapid consecutive requests
-- **⚡ Simplified Flow**: Skips IP health checks for faster testing
+- **⚡ Simplified Flow**: No proxy setup required
 
 ### Rate Limiting:
 - Only one run allowed every 15 minutes

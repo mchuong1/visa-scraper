@@ -11,6 +11,7 @@ import {
 } from './config';
 import { scrapeTLSContact } from './scraper';
 import { checkRateLimit, updateRateLimit, displayRateLimitInfo } from './rateLimiter';
+import { checkIPHealth, promptUserDecision } from './ipHealthCheck';
 
 // Validate environment (no proxy required for clean runs)
 validateEnvironment(false);
@@ -24,8 +25,8 @@ const sessionInfo: SessionInfo = {
   errors: 0
 };
 
-console.log('🧹 Clean Run Mode - No Proxy, No IP Health Check');
-console.log('⚡ Simplified automation for direct website access');
+console.log('🧹 Clean Run Mode - No Proxy, With IP Health Check');
+console.log('⚡ Direct website access with your actual IP analysis');
 console.log(`🌐 Target URL: ${tlsURL}`);
 console.log(`🖥️ User Agent: ${sessionInfo.userAgent}`);
 
@@ -44,6 +45,19 @@ console.log(`🖥️ User Agent: ${sessionInfo.userAgent}`);
   
   // Update rate limit timestamp
   updateRateLimit();
+
+  // Run IP health check (even in clean mode)
+  console.log('\n🔍 Running IP health check for your actual IP...');
+  const ipHealthResult = await checkIPHealth();
+  const proceedWithAutomation = await promptUserDecision(ipHealthResult);
+
+  if (!proceedWithAutomation) {
+    console.log('🛑 Stopping clean run due to IP health check results.');
+    console.log('💡 Consider using a different network or the standard proxy mode.');
+    process.exit(1);
+  }
+
+  console.log('\n✅ IP health check passed - proceeding with clean run...');
 
   // Launch the browser
   puppeteer.use(StealthPlugin());
@@ -78,8 +92,7 @@ console.log(`🖥️ User Agent: ${sessionInfo.userAgent}`);
   });
 
   console.log('✅ Browser launched successfully (clean mode)');
-  console.log('🔄 No IP health check in clean mode');
-  console.log('⚡ Proceeding directly to scraping...');
+  console.log('⚡ Proceeding to scraping after IP health check passed...');
 
   try {
     // Start scraping

@@ -12,10 +12,10 @@ import fetch from 'node-fetch';
 const createProxyAgent = (): any => {
   if (PROXY_HOST && PROXY_USERNAME && PROXY_PASSWORD) {
     const proxyUrl = `http://${PROXY_USERNAME}:${PROXY_PASSWORD}@${PROXY_HOST}`;
-    console.log(`🌐 Using proxy: ${PROXY_HOST} (configured)`);
+    console.log(`🌐 Using proxy for health check: ${PROXY_HOST}`);
     return new HttpsProxyAgent(proxyUrl);
   }
-  console.log('📡 No proxy configured, using direct connection');
+  console.log('📡 No proxy configured - checking your actual IP');
   return undefined;
 };
 

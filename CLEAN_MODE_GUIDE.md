@@ -1,7 +1,13 @@
 # 🧹 Clean Run Mode Usage Guide
 
 ## Overview
-Clean Run Mode provides a simplified way to test the TLS Contact scraper without using proxies, with built-in rate limiting to prevent being flagged as a bot.
+Clean Run Mode provides a way to test the TLS Contact scraper using your actual IP address (no proxy), with built-in rate limiting and comprehensive IP health analysis to assess your connection's suitability for automation.
+
+## Key Benefits
+- **🔍 Know Your IP Risk**: Understand if your actual IP will trigger CAPTCHAs
+- **🏠 Residential IP Advantage**: Often performs better than proxy IPs
+- **📊 Risk Assessment**: Get detailed analysis of your connection
+- **⚡ Quick Testing**: No proxy setup required for development
 
 ## Quick Start
 
@@ -12,8 +18,8 @@ npm run clean
 
 ### Expected Output
 ```
-🧹 Clean Run Mode - No Proxy, No IP Health Check
-⚡ Simplified automation for direct website access
+🧹 Clean Run Mode - No Proxy, With IP Health Check
+⚡ Direct website access with your actual IP analysis
 🌐 Target URL: https://visas-de.tlscontact.com/visa/gb/gbLON2de/home
 
 ⏰ Rate Limit Check:
@@ -22,6 +28,41 @@ npm run clean
 
 🚀 Starting clean run...
 ✅ Rate limit updated - Next run allowed after: 8/18/2025, 10:36:57 AM
+
+🔍 Running IP health check for your actual IP...
+📍 Step 1: Checking IP geolocation and ISP...
+🛡️ Step 2: Checking proxy/VPN detection...
+🌐 Step 3: Testing actual TLS website connectivity...
+🚫 Step 4: Checking IP reputation and blacklists...
+```
+
+## IP Health Check in Clean Mode
+
+### What It Checks
+- **🌍 Your Actual IP**: Analyzes the IP you're connecting from
+- **📍 Geolocation**: Verifies location consistency with visa application
+- **🏢 ISP Analysis**: Checks if your ISP is residential vs business/hosting
+- **🚫 Reputation**: Scans for any blacklisting or suspicious activity
+- **🌐 TLS Connectivity**: Tests actual connection to the visa website
+
+### Possible Results
+- **✅ SAFE**: Your IP is clean, proceed with confidence
+- **⚠️ CAUTION**: Some risks detected, monitor for issues
+- **🚨 UNSAFE**: High risk of blocks, consider using standard proxy mode
+
+### Sample Clean Mode IP Analysis
+```
+📊 IP Health Analysis:
+🎯 IP: 123.456.789.0
+📍 Location: London, England, GB
+🏢 ISP: BT Group PLC
+📊 Fraud Score: 15/100
+🔍 Proxy: ✅ No
+🔍 VPN/Hosting: ✅ No
+🏠 Appears to be residential IP - lower CAPTCHA risk
+✅ Geolocation consistent with visa application
+
+🎯 Recommendation: ✅ SAFE - Proceed with automation
 ```
 
 ## Rate Limiting
@@ -47,7 +88,7 @@ When rate limit is active:
 | Feature | Standard Mode | Clean Mode |
 |---------|---------------|------------|
 | **Proxy** | ✅ Required | ❌ Not used |
-| **IP Health Check** | ✅ Full analysis | ❌ Skipped |
+| **IP Health Check** | ✅ Full analysis | ✅ Analyzes your actual IP |
 | **Rate Limiting** | ❌ None | ✅ 15-minute cooldown |
 | **Environment Requirements** | Proxy + TLS credentials | TLS credentials only |
 | **Use Case** | Production automation | Testing & development |
