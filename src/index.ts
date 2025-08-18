@@ -1,6 +1,7 @@
 // Main application entry point
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import fs from 'fs';
 
 // Import modules
 import { SessionInfo } from './types';
@@ -13,6 +14,42 @@ import {
 } from './config';
 import { checkIPHealth, promptUserDecision } from './ipHealthCheck';
 import { scrapeTLSContact } from './scraper';
+
+/**
+ * Find the path to the real Chrome browser
+ */
+const findChromePath = (): string | undefined => {
+  const possiblePaths = [
+    // macOS paths
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+    
+    // Windows paths
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    
+    // Linux paths
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium'
+  ];
+
+  for (const path of possiblePaths) {
+    try {
+      if (fs.existsSync(path)) {
+        console.log(`✅ Found Chrome at: ${path}`);
+        return path;
+      }
+    } catch (error) {
+      // Continue checking other paths
+    }
+  }
+
+  console.log('⚠️ Could not find Chrome installation, using bundled Chromium');
+  return undefined; // Will use bundled Chromium
+};
 
 // Validate environment and initialize (require proxy for main index)
 validateEnvironment(true);
@@ -32,31 +69,21 @@ console.log(`🌐 Selected User Agent: ${sessionInfo.userAgent}`);
   // Launch the browser and open a new blank page
   puppeteer.use(StealthPlugin());
   
+  // Get Chrome path for real browser usage
+  const chromePath = findChromePath();
+  
   // Try with proxy first, then without if it fails
   const launchOptions = {
     headless: false,
+    defaultViewport: null, // Use actual window size instead of virtual viewport
+    executablePath: chromePath, // Use real Chrome if found, otherwise bundled Chromium
+    userDataDir: '/tmp/puppeteer-proxy-run', // Use temporary profile for proxy run
     args: [
       `--proxy-server=${PROXY_HOST}`,
-      '--no-sandbox',
-      '--disable-web-security',
-      '--disable-features=VizDisplayCompositor',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-dev-shm-usage',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-extensions-file-access-check',
-      '--disable-extensions',
-      '--disable-plugins-discovery',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-features=TranslateUI',
-      '--disable-ipc-flooding-protection',
-      '--user-agent=' + sessionInfo.userAgent
-    ],
-    defaultViewport: null,
-    devtools: false,
-    ignoreDefaultArgs: ['--enable-automation'],
+      '--start-maximized', // Start maximized like a normal user would
+      '--no-first-run', // Skip first run setup
+      '--no-default-browser-check' // Skip default browser check
+    ]
   };
 
   let browser;
@@ -74,54 +101,18 @@ console.log(`🌐 Selected User Agent: ${sessionInfo.userAgent}`);
 
   await page.setUserAgent(sessionInfo.userAgent);
 
-  // Enhanced stealth measures against Cloudflare detection
+  // Minimal stealth - only remove the most obvious automation indicators
   await page.evaluateOnNewDocument(() => {
-    // Remove webdriver property
+    // Remove webdriver property (this is the main giveaway)
     Object.defineProperty(navigator, 'webdriver', {
       get: () => undefined,
     });
-
-    // Mock plugins and languages
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [1, 2, 3, 4, 5],
-    });
-
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'en'],
-    });
-
-    // Mock chrome runtime
-    (window as any).chrome = {
-      runtime: {},
-    };
-
-    // Mock permissions
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters: PermissionDescriptor) => (
-      parameters.name === 'notifications' ?
-        Promise.resolve({ 
-          state: Notification.permission,
-          name: parameters.name,
-          onchange: null,
-          addEventListener: () => {},
-          removeEventListener: () => {},
-          dispatchEvent: () => false
-        } as PermissionStatus) :
-        originalQuery(parameters)
-    );
   });
 
-  // Set additional headers to appear more human-like
+  // Set natural headers like a real browser
   await page.setExtraHTTPHeaders({
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Upgrade-Insecure-Requests': '1'
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
   });
 
   // Authenticate with the proxy if needed (only if using proxy)
@@ -136,14 +127,6 @@ console.log(`🌐 Selected User Agent: ${sessionInfo.userAgent}`);
       console.log('⚠️ Proxy authentication failed, continuing without auth...');
     }
   }
-
-  // Intercept network requests
-  await page.setRequestInterception(true);
-  
-  // Simple request handler to continue all requests
-  page.on('request', (request) => {
-    request.continue();
-  });
 
   // Run IP health check
   const ipHealthResult = await checkIPHealth();
