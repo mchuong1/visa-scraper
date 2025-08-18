@@ -429,6 +429,7 @@ export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Pr
     
     if (!foundNoAppointments) {
       console.log('✅ Appointments may be available! Stopping search.');
+      await waitForUserInput(); // Wait for user to proceed
       break;
     }
     
