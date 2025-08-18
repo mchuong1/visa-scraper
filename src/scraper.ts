@@ -406,30 +406,56 @@ export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Pr
   while (monthsChecked < maxMonthsToCheck) {
     monthsChecked++;
     
-    // Check if there's a "no appointments available" message
-    let foundNoAppointments = false;
+    // Check for actual appointment slots (the most reliable indicator)
+    console.log(`🔍 Checking for appointment availability (month ${monthsChecked})...`);
     
-    // Try to find the no appointments message using various approaches
     try {
-      // First try: look for elements with the specific text content
-      const noAppointmentsElements = await page.$$('p');
-      for (const element of noAppointmentsElements) {
-        const text = await element.evaluate(el => el.textContent?.trim() || '');
-        if (text.includes("We currently don't have any appointment slots available") || 
-            text.includes("don't have any appointment") ||
-            text.includes("no appointment slots")) {
-          foundNoAppointments = true;
-          console.log(`📅 No appointments available in current month (attempt ${monthsChecked})`);
+      const slotElements = await page.$$('slot');
+      console.log(`🎰 Found ${slotElements.length} <slot> elements`);
+      
+      // Check if slots have content (indicating available appointments)
+      let hasAvailableSlots = false;
+      for (const slot of slotElements) {
+        const slotContent = await slot.evaluate(el => {
+          // Check if slot has any content or child elements
+          return {
+            hasContent: el.innerHTML.trim().length > 0,
+            hasChildren: el.children.length > 0,
+            textContent: el.textContent?.trim() || '',
+            innerHTML: el.innerHTML.trim().substring(0, 200)
+          };
+        });
+        
+        if (slotContent.hasContent || slotContent.hasChildren) {
+          hasAvailableSlots = true;
+          console.log(`🎯 Found slot with content: "${slotContent.innerHTML.substring(0, 100)}..."`);
           break;
+        } else {
+          console.log(`🔍 Empty slot found`);
         }
       }
+      
+      if (hasAvailableSlots) {
+        console.log('🎉 APPOINTMENTS AVAILABLE! Found slots with content.');
+        console.log('✅ Stopping search - appointments detected!');
+        await waitForUserInput(); // Wait for user to proceed
+        break;
+      } else if (slotElements.length > 0) {
+        console.log('📅 Found slot elements but they appear to be empty - no appointments available.');
+        console.log('🔄 Continuing to next month...');
+        // Continue to next month since slots exist but are empty
+      } else {
+        // No slot elements found - might be a different page structure or loading issue
+        console.log('⚠️ No <slot> elements found on this page.');
+        console.log('🔧 Manual check required - please verify the page structure.');
+        await waitForUserInput(); // Wait for user to proceed
+        break;
+      }
+      
     } catch (error) {
-      console.log('Error checking for no appointments message:', error);
-    }
-    
-    if (!foundNoAppointments) {
-      console.log('✅ Appointments may be available! Stopping search.');
-      await waitForUserInput(); // Wait for user to proceed
+      console.log('Error checking for slot elements:', error);
+      console.log('🔧 Manual check required due to error.');
+      await waitForUserInput();
       break;
     }
     
