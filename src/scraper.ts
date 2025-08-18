@@ -108,27 +108,23 @@ const checkAppointmentAvailability = async (page: Page): Promise<boolean> => {
         return true; // Return true when appointments are found
       } else if (slotElements.length > 0) {
         console.log('📅 Found slot elements but they appear to be empty - no appointments available.');
-        return false; // Return false when no appointments are available
+        // Continue to next month check instead of returning false
       } else {
         // No slot elements found - might be a different page structure or loading issue
         console.log('⚠️ No <slot> elements found on this page.');
-        console.log('🔧 Manual check required - please verify the page structure.');
-        await waitForUserInput(); // Wait for user to proceed
-        return false;
+        // Continue to next month check instead of waiting for user input
       }
       
     } catch (error) {
       console.log('Error checking for slot elements:', error);
-      console.log('🔧 Manual check required due to error.');
-      await waitForUserInput();
-      return false;
+      // Continue to next month check instead of waiting for user input
     }
     
-    // Check if we've reached the unavailable month (November 2025)
+    // Check if we've reached the unavailable month first
     try {
-      const unavailableMonth = await page.$('p[data-testid="btn-next-month-unavailable"]');
+      const unavailableMonth = await page.$('a[data-testid="btn-next-month-unavailable"], p[data-testid="btn-next-month-unavailable"]');
       if (unavailableMonth !== null) {
-        const monthText = await unavailableMonth!.evaluate((el: Element) => el.textContent?.trim());
+        const monthText = await unavailableMonth.evaluate((el: Element) => el.textContent?.trim());
         console.log(`🛑 Reached unavailable month: ${monthText}`);
         console.log('❌ No available appointments found in any accessible month.');
         return false; // Return false when reaching unavailable months
@@ -359,162 +355,194 @@ export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Pr
   }
   
   if (!loginButton) {
-    console.log('🛑 Could not find login button automatically. Please click it manually.');
-    const clickedElement = await waitForUserInputWithTracking(page);
-    if (clickedElement) {
-      console.log('💾 Save this selector for future use:', clickedElement.selectors[0]);
+    console.log('🛑 Could not find login button automatically. Checking if already logged in...');
+    
+    // Look for "My application" div which indicates user is already logged in
+    const myApplicationSelectors = [
+      'div#my-application',
+      'div[class*="cursor-pointer"]:contains("My application")',
+      'div:contains("My application")'
+    ];
+    
+    let myApplicationDiv;
+    for (const selector of myApplicationSelectors) {
+      try {
+        console.log(`Trying My application selector: ${selector}`);
+        myApplicationDiv = await page.$(selector);
+        if (myApplicationDiv) {
+          console.log(`✅ Found "My application" with selector: ${selector}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`❌ My application selector failed: ${selector}`);
+      }
+    }
+    if (myApplicationDiv) {
+      console.log('✅ Found "My application" - user appears to be already logged in!');
+      console.log('🔄 Clicking "My application" to proceed...');
+      await myApplicationDiv.click();
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {
+        console.log('ℹ️ No navigation detected after clicking My application');
+      });
+      // Skip the entire login process and go straight to the Select button logic
+    } else {
+      console.log('🛑 Login button not found and not already logged in. Please login manually.');
+      const clickedElement = await waitForUserInputWithTracking(page);
+      if (clickedElement) {
+        console.log('💾 Save this selector for future use:', clickedElement.selectors[0]);
+      }
     }
   } else {
     await loginButton.click();
     await page.waitForNavigation();
-  }
 
-  // Login
-  console.log('Waiting for username and password inputs...');
-  
-  // Debug: Check available input fields
-  const inputFields = await page.$$eval('input', inputs => 
-    inputs.map(input => ({
-      type: input.type,
-      id: input.id,
-      name: input.name,
-      className: input.className,
-      placeholder: input.placeholder,
-      visible: input.offsetParent !== null
-    }))
-  );
-  console.log('Available input fields:', inputFields);
-  
-  // Try multiple selectors for username input
-  let usernameInput;
-  const usernameSelectors = [
-    '#username',
-    'input[name="username"]',
-    'input[type="text"]',
-    'input[type="email"]',
-    'input[placeholder*="username" i]',
-    'input[placeholder*="email" i]',
-    'input[id*="user" i]',
-    'input[name*="user" i]'
-  ];
-  
-  for (const selector of usernameSelectors) {
-    try {
-      console.log(`Trying username selector: ${selector}`);
-      usernameInput = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
-      if (usernameInput) {
-        console.log(`✅ Found username input with selector: ${selector}`);
-        break;
+    // Login form processing - only if we clicked the login button
+    console.log('Waiting for username and password inputs...');
+    
+    // Debug: Check available input fields
+    const inputFields = await page.$$eval('input', inputs => 
+      inputs.map(input => ({
+        type: input.type,
+        id: input.id,
+        name: input.name,
+        className: input.className,
+        placeholder: input.placeholder,
+        visible: input.offsetParent !== null
+      }))
+    );
+    console.log('Available input fields:', inputFields);
+    
+    // Try multiple selectors for username input
+    let usernameInput;
+    const usernameSelectors = [
+      '#username',
+      'input[name="username"]',
+      'input[type="text"]',
+      'input[type="email"]',
+      'input[placeholder*="username" i]',
+      'input[placeholder*="email" i]',
+      'input[id*="user" i]',
+      'input[name*="user" i]'
+    ];
+    
+    for (const selector of usernameSelectors) {
+      try {
+        console.log(`Trying username selector: ${selector}`);
+        usernameInput = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
+        if (usernameInput) {
+          console.log(`✅ Found username input with selector: ${selector}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`❌ Username selector failed: ${selector}`);
       }
-    } catch (error) {
-      console.log(`❌ Username selector failed: ${selector}`);
     }
-  }
-  
-  if (!usernameInput) {
-    console.log('🛑 Could not find username input automatically. Please enter it manually.');
-    console.log('⏳ Click on the username field, enter your username, then press ENTER...');
-    const clickedElement = await waitForUserInputWithTracking(page);
-    if (clickedElement) {
-      console.log('💾 Save this username selector for future use:', clickedElement.selectors[0]);
-    }
-  } else {
-    await usernameInput.click();
-    await usernameInput.type(`${process.env.TLS_USERNAME}`);
-  }
-
-  // Try multiple selectors for password input
-  let passwordInput;
-  const passwordSelectors = [
-    '#password',
-    'input[name="password"]',
-    'input[type="password"]',
-    'input[placeholder*="password" i]',
-    'input[id*="pass" i]',
-    'input[name*="pass" i]'
-  ];
-  
-  for (const selector of passwordSelectors) {
-    try {
-      console.log(`Trying password selector: ${selector}`);
-      passwordInput = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
-      if (passwordInput) {
-        console.log(`✅ Found password input with selector: ${selector}`);
-        break;
+    
+    if (!usernameInput) {
+      console.log('🛑 Could not find username input automatically. Please enter it manually.');
+      console.log('⏳ Click on the username field, enter your username, then press ENTER...');
+      const clickedElement = await waitForUserInputWithTracking(page);
+      if (clickedElement) {
+        console.log('💾 Save this username selector for future use:', clickedElement.selectors[0]);
       }
-    } catch (error) {
-      console.log(`❌ Password selector failed: ${selector}`);
+    } else {
+      await usernameInput.click();
+      await usernameInput.type(`${process.env.TLS_USERNAME}`);
     }
-  }
-  
-  if (!passwordInput) {
-    console.log('🛑 Could not find password input automatically. Please enter it manually.');
-    console.log('⏳ Click on the password field, enter your password, then press ENTER...');
-    const clickedElement = await waitForUserInputWithTracking(page);
-    if (clickedElement) {
-      console.log('💾 Save this password selector for future use:', clickedElement.selectors[0]);
-    }
-  } else {
-    await passwordInput.click();
-    await passwordInput.type(`${process.env.TLS_PASSWORD}`);
-  }
 
-  // Debug: Check available buttons
-  const buttons = await page.$$eval('button, input[type="submit"]', buttons => 
-    buttons.map(button => ({
-      type: button.type,
-      textContent: button.textContent?.trim(),
-      value: button.value,
-      id: button.id,
-      className: button.className,
-      visible: button.offsetParent !== null
-    }))
-  );
-  console.log('Available buttons:', buttons);
-
-  // Try multiple selectors for submit button
-  let submitButton;
-  const submitSelectors = [
-    'button[type="submit"]',
-    'input[type="submit"]',
-    'button:contains("Login")',
-    'button:contains("Sign in")',
-    'button:contains("Submit")',
-    'button[class*="login" i]',
-    'button[class*="submit" i]',
-    'button[id*="login" i]',
-    'button[id*="submit" i]'
-  ];
-  
-  for (const selector of submitSelectors) {
-    try {
-      console.log(`Trying submit selector: ${selector}`);
-      submitButton = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
-      if (submitButton) {
-        console.log(`✅ Found submit button with selector: ${selector}`);
-        break;
+    // Try multiple selectors for password input
+    let passwordInput;
+    const passwordSelectors = [
+      '#password',
+      'input[name="password"]',
+      'input[type="password"]',
+      'input[placeholder*="password" i]',
+      'input[id*="pass" i]',
+      'input[name*="pass" i]'
+    ];
+    
+    for (const selector of passwordSelectors) {
+      try {
+        console.log(`Trying password selector: ${selector}`);
+        passwordInput = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
+        if (passwordInput) {
+          console.log(`✅ Found password input with selector: ${selector}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`❌ Password selector failed: ${selector}`);
       }
-    } catch (error) {
-      console.log(`❌ Submit selector failed: ${selector}`);
     }
-  }
-  
-  if (!submitButton) {
-    console.log('🛑 Could not find submit button automatically. Please click it manually.');
-    console.log('⏳ Click the login/submit button, then press ENTER...');
-    const clickedElement = await waitForUserInputWithTracking(page);
-    if (clickedElement) {
-      console.log('💾 Save this submit button selector for future use:', clickedElement.selectors[0]);
+    
+    if (!passwordInput) {
+      console.log('🛑 Could not find password input automatically. Please enter it manually.');
+      console.log('⏳ Click on the password field, enter your password, then press ENTER...');
+      const clickedElement = await waitForUserInputWithTracking(page);
+      if (clickedElement) {
+        console.log('💾 Save this password selector for future use:', clickedElement.selectors[0]);
+      }
+    } else {
+      await passwordInput.click();
+      await passwordInput.type(`${process.env.TLS_PASSWORD}`);
     }
-  } else {
-    await submitButton.click();
-    await page.waitForNavigation();
-  }
-  
-  console.log('Logged in successfully!');
 
-  // Wait for page to load after login
-  console.log('🔄 Waiting for the page to load after login...');
+    // Debug: Check available buttons
+    const buttons = await page.$$eval('button, input[type="submit"]', buttons => 
+      buttons.map(button => ({
+        type: button.type,
+        textContent: button.textContent?.trim(),
+        value: button.value,
+        id: button.id,
+        className: button.className,
+        visible: button.offsetParent !== null
+      }))
+    );
+    console.log('Available buttons:', buttons);
+
+    // Try multiple selectors for submit button
+    let submitButton;
+    const submitSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button:contains("Login")',
+      'button:contains("Sign in")',
+      'button:contains("Submit")',
+      'button[class*="login" i]',
+      'button[class*="submit" i]',
+      'button[id*="login" i]',
+      'button[id*="submit" i]'
+    ];
+    
+    for (const selector of submitSelectors) {
+      try {
+        console.log(`Trying submit selector: ${selector}`);
+        submitButton = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
+        if (submitButton) {
+          console.log(`✅ Found submit button with selector: ${selector}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`❌ Submit selector failed: ${selector}`);
+      }
+    }
+    
+    if (!submitButton) {
+      console.log('🛑 Could not find submit button automatically. Please click it manually.');
+      console.log('⏳ Click the login/submit button, then press ENTER...');
+      const clickedElement = await waitForUserInputWithTracking(page);
+      if (clickedElement) {
+        console.log('💾 Save this submit button selector for future use:', clickedElement.selectors[0]);
+      }
+    } else {
+      await submitButton.click();
+      await page.waitForNavigation();
+    }
+    
+    console.log('Logged in successfully!');
+  }
+
+  // Wait for page to load after login (or after clicking My application)
+  console.log('🔄 Waiting for the page to load...');
   await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for page to stabilize
 
   // Find and click the Select button (group selection)
