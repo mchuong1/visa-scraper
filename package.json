@@ -2,19 +2,26 @@
   "name": "visa-scraper",
   "version": "1.0.0",
   "description": "Bot to scrape for visa appointments from TLS Contact website",
-  "main": "index.ts",
+  "main": "src/index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "npx tsc",
-    "start": "node build/api.ts"
+    "start": "npx tsc && node build/index.js"
   },
   "author": "Matthew Chuong",
   "license": "ISC",
   "dependencies": {
-    "puppeteer": "^22.6.2"
+    "dotenv": "^16.4.5",
+    "puppeteer": "^22.6.2",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.12.2",
+    "@types/puppeteer": "^7.0.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.3"
   }
