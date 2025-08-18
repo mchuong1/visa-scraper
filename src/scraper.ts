@@ -7,6 +7,274 @@ import { waitForUserInput, debugPageContent, waitForUserInputWithTracking } from
 import { handleCaptchaLoop, detectCaptcha } from './captcha';
 
 /**
+ * Perform human-like movements on the page to avoid detection
+ */
+const performHumanLikeMovements = async (page: Page): Promise<void> => {
+  console.log('🤖 Performing human-like movements...');
+  
+  try {
+    // Get page dimensions
+    const dimensions = await page.evaluate(() => {
+      return {
+        width: window.innerWidth,
+        height: window.innerHeight
+      };
+    });
+    
+    // Perform 3-5 random movements
+    const movements = Math.floor(Math.random() * 3) + 3;
+    
+    for (let i = 0; i < movements; i++) {
+      // Random coordinates within the page
+      const x = Math.floor(Math.random() * dimensions.width);
+      const y = Math.floor(Math.random() * dimensions.height);
+      
+      // Move mouse to random position with human-like speed
+      await page.mouse.move(x, y, { steps: Math.floor(Math.random() * 5) + 3 });
+      
+      // Random small delay between movements
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
+    }
+    
+    // Occasionally scroll a bit
+    if (Math.random() > 0.5) {
+      const scrollAmount = Math.floor(Math.random() * 300) + 100;
+      await page.evaluate((amount) => {
+        window.scrollBy(0, amount);
+      }, scrollAmount);
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Scroll back
+      await page.evaluate((amount) => {
+        window.scrollBy(0, -amount);
+      }, scrollAmount);
+    }
+    
+    // Random final delay
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
+    
+    console.log('✅ Human-like movements completed');
+    
+  } catch (error) {
+    console.log('⚠️ Error during human-like movements:', error);
+  }
+};
+
+/**
+ * Check for appointment availability and navigate through months
+ */
+const checkAppointmentAvailability = async (page: Page): Promise<boolean> => {
+  console.log('🔍 Checking for appointment availability...');
+  
+  let monthsChecked = 0;
+  const maxMonthsToCheck = 12; // Safety limit to prevent infinite loops
+  
+  while (monthsChecked < maxMonthsToCheck) {
+    monthsChecked++;
+    
+    // Check for actual appointment slots (the most reliable indicator)
+    console.log(`🔍 Checking for appointment availability (month ${monthsChecked})...`);
+    
+    try {
+      const slotElements = await page.$$('slot');
+      console.log(`🎰 Found ${slotElements.length} <slot> elements`);
+      
+      // Check if slots have content (indicating available appointments)
+      let hasAvailableSlots = false;
+      for (const slot of slotElements) {
+        const slotContent = await slot.evaluate(el => {
+          // Check if slot has any content or child elements
+          return {
+            hasContent: el.innerHTML.trim().length > 0,
+            hasChildren: el.children.length > 0,
+            textContent: el.textContent?.trim() || '',
+            innerHTML: el.innerHTML.trim().substring(0, 200)
+          };
+        });
+        
+        if (slotContent.hasContent || slotContent.hasChildren) {
+          hasAvailableSlots = true;
+          console.log(`🎯 Found slot with content: "${slotContent.innerHTML.substring(0, 100)}..."`);
+          break;
+        } else {
+          console.log(`🔍 Empty slot found`);
+        }
+      }
+      
+      if (hasAvailableSlots) {
+        console.log('🎉 APPOINTMENTS AVAILABLE! Found slots with content.');
+        console.log('✅ Stopping search - appointments detected!');
+        return true; // Return true when appointments are found
+      } else if (slotElements.length > 0) {
+        console.log('📅 Found slot elements but they appear to be empty - no appointments available.');
+        return false; // Return false when no appointments are available
+      } else {
+        // No slot elements found - might be a different page structure or loading issue
+        console.log('⚠️ No <slot> elements found on this page.');
+        console.log('🔧 Manual check required - please verify the page structure.');
+        await waitForUserInput(); // Wait for user to proceed
+        return false;
+      }
+      
+    } catch (error) {
+      console.log('Error checking for slot elements:', error);
+      console.log('🔧 Manual check required due to error.');
+      await waitForUserInput();
+      return false;
+    }
+    
+    // Check if we've reached the unavailable month (November 2025)
+    try {
+      const unavailableMonth = await page.$('p[data-testid="btn-next-month-unavailable"]');
+      if (unavailableMonth !== null) {
+        const monthText = await unavailableMonth!.evaluate((el: Element) => el.textContent?.trim());
+        console.log(`🛑 Reached unavailable month: ${monthText}`);
+        console.log('❌ No available appointments found in any accessible month.');
+        return false; // Return false when reaching unavailable months
+      }
+    } catch (error) {
+      console.log('No unavailable month button found, continuing...');
+    }
+    
+    // Look for the next month button
+    console.log('Looking for next month button...');
+    
+    let nextMonthButton;
+    const nextMonthSelectors = [
+      'a[data-testid="btn-next-month-available"]', // Most specific - data-testid
+      'a[class*="MonthSelector_month-selector_button"][class*="--active"]', // Class pattern for active month selector
+      'a[href*="appointment-booking"][href*="month="]', // Href pattern with month parameter
+    ];
+    
+    // Also try to find next month button by looking for active month selectors
+    try {
+      const monthButtons = await page.$$('a[class*="MonthSelector_month-selector_button"]');
+      for (const button of monthButtons) {
+        const classList = await button.evaluate((el: Element) => el.className);
+        const isActive = classList.includes('--active') || classList.includes('MonthSelector_--active');
+        const isDisabled = classList.includes('--disabled') || classList.includes('MonthSelector_--disabled');
+        
+        if (isActive && !isDisabled) {
+          nextMonthButton = button;
+          console.log('✅ Found active month button');
+          break;
+        }
+      }
+    } catch (error) {
+      console.log('Error finding month buttons:', error);
+    }
+    
+    // Fallback to the selector-based approach
+    if (!nextMonthButton) {
+      for (const selector of nextMonthSelectors) {
+        try {
+          console.log(`Trying next month selector: ${selector}`);
+          nextMonthButton = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
+          if (nextMonthButton) {
+            const monthText = await nextMonthButton.evaluate((el: Element) => el.textContent?.trim());
+            console.log(`✅ Found next month button with selector: ${selector} - ${monthText}`);
+            break;
+          }
+        } catch (error) {
+          console.log(`❌ Next month selector failed: ${selector}`);
+        }
+      }
+    }
+    
+    if (!nextMonthButton) {
+      console.log('🛑 Could not find next month button. Checking if we\'ve reached the end...');
+      
+      // Check if there are any month selectors available at all
+      const allMonthButtons = await page.$$('a[class*="MonthSelector_month-selector_button"], p[class*="MonthSelector_month-selector_button"]');
+      const monthInfo = [];
+      
+      for (const button of allMonthButtons) {
+        const text = await button.evaluate((el: Element) => el.textContent?.trim());
+        const className = await button.evaluate((el: Element) => el.className);
+        const isDisabled = className.includes('--disabled') || await button.evaluate((el: Element) => el.tagName === 'P');
+        const testId = await button.evaluate((el: Element) => el.getAttribute('data-testid'));
+        monthInfo.push({ text, isDisabled, testId, className });
+      }
+      
+      console.log('Available month buttons:', monthInfo);
+      
+      if (monthInfo.some(m => m.isDisabled || m.testId === 'btn-next-month-unavailable')) {
+        console.log('📅 Reached end of available months.');
+        return false; // Return false when reaching end of available months
+      } else {
+        console.log('🛑 Unable to navigate to next month automatically. Please check manually.');
+        console.log('⏳ Navigate to the next month if available, then press ENTER...');
+        await waitForUserInput();
+        return false;
+      }
+    } else {
+      // Click the next month button
+      const monthText = await nextMonthButton.evaluate((el: Element) => el.textContent?.trim());
+      console.log(`🔄 Clicking next month button: ${monthText}`);
+      
+      await nextMonthButton.click();
+      
+      // Wait for the page to update
+      console.log('⏳ Waiting for month to change...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Wait for any navigation or content updates
+      try {
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 });
+      } catch (error) {
+        console.log('ℹ️ No navigation detected after clicking next month');
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Additional stabilization time
+    }
+  }
+  
+  // If we exit the loop due to max months, return false
+  if (monthsChecked >= maxMonthsToCheck) {
+    console.log(`⚠️ Reached maximum month check limit (${maxMonthsToCheck}).`);
+    return false;
+  }
+  
+  return false;
+};
+
+/**
+ * Continuously monitor for appointment availability
+ */
+const monitorAppointments = async (page: Page): Promise<void> => {
+  console.log('🔄 Starting continuous appointment monitoring...');
+  
+  while (true) {
+    // Check for appointments
+    const appointmentsFound = await checkAppointmentAvailability(page);
+    
+    if (appointmentsFound) {
+      console.log('🎉 APPOINTMENTS FOUND! Stopping monitoring.');
+      await waitForUserInput(); // Wait for user to proceed with booking
+      break;
+    }
+    
+    console.log('📅 No appointments available. Will refresh and check again...');
+    
+    // Perform human-like movements before waiting
+    await performHumanLikeMovements(page);
+    
+    // Wait 5-8 minutes before refreshing and checking again
+    const waitTime = Math.floor(Math.random() * (8 - 5 + 1) + 5) * 60 * 1000; // 5-8 minutes in milliseconds
+    console.log(`⏰ Waiting ${Math.floor(waitTime / 60000)} minutes before next check...`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+    
+    // Refresh the page to check again
+    console.log('🔄 Refreshing page to check for new appointments...');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    
+    // Wait for page to stabilize after refresh
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+};
+
+/**
  * Main TLS Contact scraping function
  */
 export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Promise<void> => {
@@ -310,48 +578,48 @@ export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Pr
   await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for page to stabilize
 
   // Find and ensure the checkbox is checked
-  console.log('Looking for the PTA/GBLON2DE-GBP checkbox...');
+  // console.log('Looking for the PTA/GBLON2DE-GBP checkbox...');
   
-  let checkbox;
-  const checkboxSelectors = [
-    'input[data-testid="checkbox-mobile-view-PTA/GBLON2DE-GBP"]', // Most specific - data-testid
-    'input[id="checkbox-mobile-view-PTA/GBLON2DE-GBP"]', // ID selector
-    'input[value="PTA/GBLON2DE-GBP"]', // Value selector
-    'input[type="checkbox"][class*="TlsCheckbox_tls-checkbox_input"]', // Class pattern
-  ];
+  // let checkbox;
+  // const checkboxSelectors = [
+  //   'input[data-testid="checkbox-mobile-view-PTA/GBLON2DE-GBP"]', // Most specific - data-testid
+  //   'input[id="checkbox-mobile-view-PTA/GBLON2DE-GBP"]', // ID selector
+  //   'input[value="PTA/GBLON2DE-GBP"]', // Value selector
+  //   'input[type="checkbox"][class*="TlsCheckbox_tls-checkbox_input"]', // Class pattern
+  // ];
   
-  for (const selector of checkboxSelectors) {
-    try {
-      console.log(`Trying checkbox selector: ${selector}`);
-      checkbox = await page.waitForSelector(selector, { visible: true, timeout: 5000 });
-      if (checkbox) {
-        console.log(`✅ Found checkbox with selector: ${selector}`);
-        break;
-      }
-    } catch (error) {
-      console.log(`❌ Checkbox selector failed: ${selector}`);
-    }
-  }
+  // for (const selector of checkboxSelectors) {
+  //   try {
+  //     console.log(`Trying checkbox selector: ${selector}`);
+  //     checkbox = await page.waitForSelector(selector, { visible: true, timeout: 5000 });
+  //     if (checkbox) {
+  //       console.log(`✅ Found checkbox with selector: ${selector}`);
+  //       break;
+  //     }
+  //   } catch (error) {
+  //     console.log(`❌ Checkbox selector failed: ${selector}`);
+  //   }
+  // }
   
-  if (!checkbox) {
-    console.log('🛑 Could not find checkbox automatically. Please check it manually.');
-    console.log('⏳ Please check the PTA/GBLON2DE-GBP checkbox, then press ENTER...');
-    const clickedElement = await waitForUserInputWithTracking(page);
-    if (clickedElement) {
-      console.log('💾 Save this checkbox selector for future use:', clickedElement.selectors[0]);
-    }
-  } else {
-    // Check if the checkbox is already checked
-    const isChecked = await checkbox.evaluate(el => (el as HTMLInputElement).checked);
-    console.log(`📋 Checkbox current state: ${isChecked ? 'checked' : 'unchecked'}`);
+  // if (!checkbox) {
+  //   console.log('🛑 Could not find checkbox automatically. Please check it manually.');
+  //   console.log('⏳ Please check the PTA/GBLON2DE-GBP checkbox, then press ENTER...');
+  //   const clickedElement = await waitForUserInputWithTracking(page);
+  //   if (clickedElement) {
+  //     console.log('💾 Save this checkbox selector for future use:', clickedElement.selectors[0]);
+  //   }
+  // } else {
+  //   // Check if the checkbox is already checked
+  //   const isChecked = await checkbox.evaluate(el => (el as HTMLInputElement).checked);
+  //   console.log(`📋 Checkbox current state: ${isChecked ? 'checked' : 'unchecked'}`);
     
-    if (isChecked) {
-      await checkbox.click();
-      console.log('✅ Checkbox unchecked successfully!');
-    } else {
-      console.log('✅ Checkbox is already unchecked!');
-    }
-  }
+  //   if (isChecked) {
+  //     await checkbox.click();
+  //     console.log('✅ Checkbox unchecked successfully!');
+  //   } else {
+  //     console.log('✅ Checkbox is already unchecked!');
+  //   }
+  // }
 
   // Find and click the Continue button
   console.log('Looking for Continue button...');
@@ -397,172 +665,8 @@ export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Pr
   console.log('🔄 Waiting for page to load after continue button click...');
   await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for page to stabilize
 
-  // Check for appointment availability and navigate through months
-  console.log('🔍 Checking for appointment availability...');
-  
-  let monthsChecked = 0;
-  const maxMonthsToCheck = 12; // Safety limit to prevent infinite loops
-  
-  while (monthsChecked < maxMonthsToCheck) {
-    monthsChecked++;
-    
-    // Check for actual appointment slots (the most reliable indicator)
-    console.log(`🔍 Checking for appointment availability (month ${monthsChecked})...`);
-    
-    try {
-      const slotElements = await page.$$('slot');
-      console.log(`🎰 Found ${slotElements.length} <slot> elements`);
-      
-      // Check if slots have content (indicating available appointments)
-      let hasAvailableSlots = false;
-      for (const slot of slotElements) {
-        const slotContent = await slot.evaluate(el => {
-          // Check if slot has any content or child elements
-          return {
-            hasContent: el.innerHTML.trim().length > 0,
-            hasChildren: el.children.length > 0,
-            textContent: el.textContent?.trim() || '',
-            innerHTML: el.innerHTML.trim().substring(0, 200)
-          };
-        });
-        
-        if (slotContent.hasContent || slotContent.hasChildren) {
-          hasAvailableSlots = true;
-          console.log(`🎯 Found slot with content: "${slotContent.innerHTML.substring(0, 100)}..."`);
-          break;
-        } else {
-          console.log(`🔍 Empty slot found`);
-        }
-      }
-      
-      if (hasAvailableSlots) {
-        console.log('🎉 APPOINTMENTS AVAILABLE! Found slots with content.');
-        console.log('✅ Stopping search - appointments detected!');
-        await waitForUserInput(); // Wait for user to proceed
-        break;
-      } else if (slotElements.length > 0) {
-        console.log('📅 Found slot elements but they appear to be empty - no appointments available.');
-        console.log('🔄 Continuing to next month...');
-        // Continue to next month since slots exist but are empty
-      } else {
-        // No slot elements found - might be a different page structure or loading issue
-        console.log('⚠️ No <slot> elements found on this page.');
-        console.log('🔧 Manual check required - please verify the page structure.');
-        await waitForUserInput(); // Wait for user to proceed
-        break;
-      }
-      
-    } catch (error) {
-      console.log('Error checking for slot elements:', error);
-      console.log('🔧 Manual check required due to error.');
-      await waitForUserInput();
-      break;
-    }
-    
-    // Check if we've reached the unavailable month (November 2025)
-    const unavailableMonth = await page.$('p[data-testid="btn-next-month-unavailable"]').catch(() => null);
-    if (unavailableMonth) {
-      const monthText = await unavailableMonth.evaluate(el => el.textContent?.trim());
-      console.log(`🛑 Reached unavailable month: ${monthText}`);
-      console.log('❌ No available appointments found in any accessible month.');
-      break;
-    }
-    
-    // Look for the next month button
-    console.log('Looking for next month button...');
-    
-    let nextMonthButton;
-    const nextMonthSelectors = [
-      'a[data-testid="btn-next-month-available"]', // Most specific - data-testid
-      'a[class*="MonthSelector_month-selector_button"][class*="--active"]', // Class pattern for active month selector
-      'a[href*="appointment-booking"][href*="month="]', // Href pattern with month parameter
-    ];
-    
-    // Also try to find next month button by looking for active month selectors
-    try {
-      const monthButtons = await page.$$('a[class*="MonthSelector_month-selector_button"]');
-      for (const button of monthButtons) {
-        const classList = await button.evaluate(el => el.className);
-        const isActive = classList.includes('--active') || classList.includes('MonthSelector_--active');
-        const isDisabled = classList.includes('--disabled') || classList.includes('MonthSelector_--disabled');
-        
-        if (isActive && !isDisabled) {
-          nextMonthButton = button;
-          console.log('✅ Found active month button');
-          break;
-        }
-      }
-    } catch (error) {
-      console.log('Error finding month buttons:', error);
-    }
-    
-    // Fallback to the selector-based approach
-    if (!nextMonthButton) {
-      for (const selector of nextMonthSelectors) {
-        try {
-          console.log(`Trying next month selector: ${selector}`);
-          nextMonthButton = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
-          if (nextMonthButton) {
-            const monthText = await nextMonthButton.evaluate(el => el.textContent?.trim());
-            console.log(`✅ Found next month button with selector: ${selector} - ${monthText}`);
-            break;
-          }
-        } catch (error) {
-          console.log(`❌ Next month selector failed: ${selector}`);
-        }
-      }
-    }
-    
-    if (!nextMonthButton) {
-      console.log('🛑 Could not find next month button. Checking if we\'ve reached the end...');
-      
-      // Check if there are any month selectors available at all
-      const allMonthButtons = await page.$$('a[class*="MonthSelector_month-selector_button"], p[class*="MonthSelector_month-selector_button"]');
-      const monthInfo = [];
-      
-      for (const button of allMonthButtons) {
-        const text = await button.evaluate(el => el.textContent?.trim());
-        const className = await button.evaluate(el => el.className);
-        const isDisabled = className.includes('--disabled') || await button.evaluate(el => el.tagName === 'P');
-        const testId = await button.evaluate(el => el.getAttribute('data-testid'));
-        monthInfo.push({ text, isDisabled, testId, className });
-      }
-      
-      console.log('Available month buttons:', monthInfo);
-      
-      if (monthInfo.some(m => m.isDisabled || m.testId === 'btn-next-month-unavailable')) {
-        console.log('❌ No available appointments found. Reached the end of available months.');
-      } else {
-        console.log('🛑 Unable to navigate to next month automatically. Please check manually.');
-        console.log('⏳ Navigate to the next month if available, then press ENTER...');
-        await waitForUserInput();
-      }
-      break;
-    } else {
-      // Click the next month button
-      const monthText = await nextMonthButton.evaluate(el => el.textContent?.trim());
-      console.log(`🔄 Clicking next month button: ${monthText}`);
-      
-      await nextMonthButton.click();
-      
-      // Wait for the page to update
-      console.log('⏳ Waiting for month to change...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Wait for any navigation or content updates
-      try {
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 });
-      } catch (error) {
-        console.log('ℹ️ No navigation detected after clicking next month');
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Additional stabilization time
-    }
-  }
-  
-  if (monthsChecked >= maxMonthsToCheck) {
-    console.log(`⚠️ Reached maximum month check limit (${maxMonthsToCheck}). Stopping search.`);
-  }
+  // Start continuous appointment monitoring
+  await monitorAppointments(page);
 };
 
 /**
