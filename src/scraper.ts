@@ -262,7 +262,9 @@ const monitorAppointments = async (page: Page): Promise<void> => {
     
     // Wait 5-8 minutes before refreshing and checking again
     const waitTime = Math.floor(Math.random() * (8 - 5 + 1) + 5) * 60 * 1000; // 5-8 minutes in milliseconds
+    const nextRefreshTime = new Date(Date.now() + waitTime);
     console.log(`⏰ Waiting ${Math.floor(waitTime / 60000)} minutes before next check...`);
+    console.log(`🕐 Next refresh scheduled at: ${nextRefreshTime.toLocaleString()}`);
     await new Promise(resolve => setTimeout(resolve, waitTime));
     
     // Refresh the page to check again
