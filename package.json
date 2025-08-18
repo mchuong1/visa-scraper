@@ -7,7 +7,10 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "npx tsc",
     "start": "npx tsc && node build/index.js",
-    "clean": "npx tsc && node build/cleanRun.js"
+    "clean": "npx tsc && node build/cleanRun.js",
+    "test:browser": "npx tsc && node test-browser-management.js",
+    "test:captcha": "node test-captcha-integration.js",
+    "test:health": "node test-health-check.js"
   },
   "author": "Matthew Chuong",
   "license": "ISC",

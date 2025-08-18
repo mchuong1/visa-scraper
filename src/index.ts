@@ -1,16 +1,8 @@
-// Main application entry point
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import fs from 'fs';
-
-// Import modules
+// Main application entry point with advanced browser lifecycle management
+import { BrowserManager } from './browserManager';
 import { SessionInfo } from './types';
 import { 
-  validateEnvironment, 
-  getRandomUserAgent, 
-  PROXY_HOST, 
-  PROXY_USERNAME, 
-  PROXY_PASSWORD,
+  validateEnvironment,
   TWOCAPTCHA_API_KEY,
   ANTICAPTCHA_API_KEY 
 } from './config';
@@ -18,149 +10,143 @@ import { checkIPHealth, promptUserDecision } from './ipHealthCheck';
 import { scrapeTLSContact } from './scraper';
 
 /**
- * Find the path to the real Chrome browser
+ * Main application execution with browser lifecycle management
  */
-const findChromePath = (): string | undefined => {
-  const possiblePaths = [
-    // macOS paths
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-    
-    // Windows paths
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    
-    // Linux paths
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium'
-  ];
-
-  for (const path of possiblePaths) {
-    try {
-      if (fs.existsSync(path)) {
-        console.log(`✅ Found Chrome at: ${path}`);
-        return path;
-      }
-    } catch (error) {
-      // Continue checking other paths
-    }
-  }
-
-  console.log('⚠️ Could not find Chrome installation, using bundled Chromium');
-  return undefined; // Will use bundled Chromium
-};
-
-// Validate environment and initialize (require proxy for main index)
-validateEnvironment(true);
-
-// Session tracking
-const sessionInfo: SessionInfo = {
-  startTime: new Date().toISOString(),
-  userAgent: getRandomUserAgent(),
-  proxyUsed: false,
-  captchaSolved: 0,
-  errors: 0
-};
-
-console.log(`🌐 Selected User Agent: ${sessionInfo.userAgent}`);
-
-// Display CAPTCHA service status
-if (TWOCAPTCHA_API_KEY || ANTICAPTCHA_API_KEY) {
-  console.log('🤖 Automated CAPTCHA solving: ✅ ENABLED');
+(async () => {
+  console.log('🎬 Starting Visa Scraper with Advanced Browser Management...');
+  
+  // Show configuration status
+  console.log('\n🔧 Configuration Status:');
   if (TWOCAPTCHA_API_KEY) console.log('   - 2Captcha service: ✅ Configured');
   if (ANTICAPTCHA_API_KEY) console.log('   - Anti-Captcha service: ✅ Configured');
-} else {
-  console.log('🤖 Automated CAPTCHA solving: ❌ DISABLED');
-  console.log('   💡 Add TWOCAPTCHA_API_KEY or ANTICAPTCHA_API_KEY to .env for automation');
-}
+  if (!TWOCAPTCHA_API_KEY && !ANTICAPTCHA_API_KEY) {
+    console.log('   - CAPTCHA services: ⚠️ None configured (manual solving only)');
+  }
 
-(async () => {
-  // Launch the browser and open a new blank page
-  puppeteer.use(StealthPlugin());
-  
-  // Get Chrome path for real browser usage
-  const chromePath = findChromePath();
-  
-  // Try with proxy first, then without if it fails
-  const launchOptions = {
-    headless: false,
-    defaultViewport: null, // Use actual window size instead of virtual viewport
-    executablePath: chromePath, // Use real Chrome if found, otherwise bundled Chromium
-    userDataDir: '/tmp/puppeteer-proxy-run', // Use temporary profile for proxy run
-    args: [
-      `--proxy-server=${PROXY_HOST}`,
-      '--start-maximized', // Start maximized like a normal user would
-      '--no-first-run', // Skip first run setup
-      '--no-default-browser-check' // Skip default browser check
-    ]
-  };
+  // Validate environment
+  validateEnvironment();
 
-  let browser;
+  // Initialize browser manager
+  const browserManager = new BrowserManager('./session-data.json');
+  
+  // Graceful shutdown handling
+  process.on('SIGINT', async () => {
+    console.log('\n🛑 Graceful shutdown initiated...');
+    await browserManager.cleanup();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', async () => {
+    console.log('\n🛑 Graceful shutdown initiated...');
+    await browserManager.cleanup();
+    process.exit(0);
+  });
+
   try {
-    console.log('🚀 Launching browser with proxy...');
-    browser = await puppeteer.launch(launchOptions);
-    sessionInfo.proxyUsed = true;
-  } catch (error) {
-    console.log('⚠️ Proxy launch failed, trying without proxy...');
-    launchOptions.args = launchOptions.args.filter(arg => !arg.includes('proxy-server'));
-    browser = await puppeteer.launch(launchOptions);
-  }
+    // Run IP health check first
+    console.log('\n🏥 Running IP health check...');
+    const ipHealthResult = await checkIPHealth();
+    const proceedWithProxy = await promptUserDecision(ipHealthResult);
 
-  const [page] = await browser.pages();
-
-  await page.setUserAgent(sessionInfo.userAgent);
-
-  // Minimal stealth - only remove the most obvious automation indicators
-  await page.evaluateOnNewDocument(() => {
-    // Remove webdriver property (this is the main giveaway)
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => undefined,
-    });
-  });
-
-  // Set natural headers like a real browser
-  await page.setExtraHTTPHeaders({
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
-  });
-
-  // Authenticate with the proxy if needed (only if using proxy)
-  if (launchOptions.args.some(arg => arg.includes('proxy-server'))) {
-    try {
-      await page.authenticate({
-        username: PROXY_USERNAME,
-        password: PROXY_PASSWORD
-      });
-      console.log('✅ Proxy authentication successful');
-    } catch (error) {
-      console.log('⚠️ Proxy authentication failed, continuing without auth...');
+    if (!proceedWithProxy) {
+      console.log('🛑 Stopping automation due to IP health check results.');
+      return;
     }
+
+    // Main scraping loop with browser lifecycle management
+    let sessionCount = 0;
+    const maxSessions = 50; // Prevent infinite loops
+
+    while (sessionCount < maxSessions) {
+      sessionCount++;
+      console.log(`\n🔄 Starting scraping session #${sessionCount}`);
+
+      try {
+        // Launch or restart browser if needed
+        let session = browserManager.getCurrentSession();
+        if (!session || browserManager.shouldRestart()) {
+          session = await browserManager.restartBrowser();
+        }
+
+        // Save session data before starting scraping
+        await browserManager.saveSessionData();
+
+        // Start scraping with current session
+        await scrapeTLSContact(session.page, session.sessionInfo);
+
+        // Session completed successfully
+        console.log('\n🎉 Scraping session completed successfully!');
+        
+        // Show session summary
+        console.log('\n📊 Session Summary:');
+        console.log(`⏰ Started: ${session.sessionInfo.startTime}`);
+        console.log(`🌐 User Agent: ${session.sessionInfo.userAgent}`);
+        console.log(`🔗 Proxy Used: ${session.sessionInfo.proxyUsed ? '✅' : '❌'}`);
+        console.log(`🤖 CAPTCHAs Handled: ${session.sessionInfo.captchaSolved}`);
+        console.log(`❌ Errors Encountered: ${session.sessionInfo.errors}`);
+        console.log(`🔄 Browser Restarts: ${session.restartCount}`);
+        console.log(`🧠 Memory Usage: ${Math.round(session.memoryUsage / 1024 / 1024)}MB`);
+
+        // Check if we should continue or stop
+        console.log('\n🤔 Continue scraping?');
+        console.log('   - Press ENTER to continue with current session');
+        console.log('   - Type "restart" to restart browser and continue');
+        console.log('   - Type "stop" to exit gracefully');
+        
+        const readline = require('readline');
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+
+        const choice = await new Promise<string>((resolve) => {
+          rl.question('⏳ Your choice: ', (answer: string) => {
+            rl.close();
+            resolve(answer.trim().toLowerCase());
+          });
+        });
+
+        if (choice === 'stop') {
+          console.log('🛑 Stopping automation as requested...');
+          break;
+        } else if (choice === 'restart') {
+          console.log('🔄 Restarting browser as requested...');
+          await browserManager.restartBrowser();
+        }
+
+      } catch (error) {
+        console.error(`❌ Error in session #${sessionCount}:`, error);
+        
+        // Increment error count
+        const currentSession = browserManager.getCurrentSession();
+        if (currentSession) {
+          currentSession.sessionInfo.errors++;
+        }
+
+        // Force restart browser on error
+        console.log('🔄 Restarting browser due to error...');
+        try {
+          await browserManager.restartBrowser();
+        } catch (restartError) {
+          console.error('❌ Failed to restart browser:', restartError);
+          break;
+        }
+
+        // Wait before retrying
+        console.log('⏳ Waiting 30 seconds before retry...');
+        await new Promise(resolve => setTimeout(resolve, 30000));
+      }
+    }
+
+    if (sessionCount >= maxSessions) {
+      console.log('⚠️ Maximum session limit reached. Stopping automation.');
+    }
+
+  } catch (error) {
+    console.error('❌ Fatal error:', error);
+  } finally {
+    // Clean up
+    await browserManager.cleanup();
+    console.log('✅ Application shutdown complete');
   }
-
-  // Run IP health check
-  const ipHealthResult = await checkIPHealth();
-  const proceedWithProxy = await promptUserDecision(ipHealthResult);
-
-  if (!proceedWithProxy) {
-    console.log('🛑 Stopping automation due to IP health check results.');
-    await browser.close();
-    return;
-  }
-
-  // Start scraping
-  await scrapeTLSContact(page, sessionInfo);
-
-  // Session summary
-  console.log('\n🏁 Session Summary:');
-  console.log(`⏰ Started: ${sessionInfo.startTime}`);
-  console.log(`🌐 User Agent: ${sessionInfo.userAgent}`);
-  console.log(`🔗 Proxy Used: ${sessionInfo.proxyUsed ? '✅' : '❌'}`);
-  console.log(`🤖 CAPTCHAs Handled: ${sessionInfo.captchaSolved}`);
-  console.log(`❌ Errors Encountered: ${sessionInfo.errors}`);
-  console.log(`✅ Session completed successfully!`);
-
-  await browser.close();
 })();

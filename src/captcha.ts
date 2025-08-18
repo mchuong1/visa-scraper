@@ -62,7 +62,19 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
         }
       } else {
         console.log(`❌ Automated solving failed: ${automatedResult.error}`);
-        console.log('🔄 Falling back to manual solving...');
+        console.log('🔄 Falling back to checkbox clicking and manual solving...');
+      }
+    }
+    
+    // Try clicking Cloudflare checkbox if it's a simple challenge
+    if (captchaStatus.type.includes('cloudflare')) {
+      console.log('🔘 Attempting to click Cloudflare checkbox...');
+      const checkboxClicked = await clickCloudflareCheckbox(page);
+      if (checkboxClicked) {
+        console.log('✅ Cloudflare checkbox challenge resolved!');
+        break;
+      } else {
+        console.log('❌ Cloudflare checkbox click failed, continuing to manual options...');
       }
     }
     
@@ -75,8 +87,9 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
     console.log('   5. Type "cookies" and press ENTER to clear cookies and try again');
     console.log('   6. Type "stealth" and press ENTER to try stealth reload');
     console.log('   7. Type "human" and press ENTER for human-like browsing simulation');
+    console.log('   8. Type "checkbox" and press ENTER to try clicking Cloudflare checkbox');
     if (captchaService) {
-      console.log('   8. Type "auto" and press ENTER to retry automated solving');
+      console.log('   9. Type "auto" and press ENTER to retry automated solving');
     }
     console.log('⏳ Your choice:');
     
@@ -109,6 +122,16 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
     } else if (userChoice === 'human') {
       console.log('👤 Simulating human browsing behavior...');
       await simulateHumanBehavior(page);
+      continue;
+    } else if (userChoice === 'checkbox') {
+      console.log('🔘 Attempting to click Cloudflare checkbox...');
+      const checkboxClicked = await clickCloudflareCheckbox(page);
+      if (checkboxClicked) {
+        console.log('✅ Cloudflare checkbox challenge resolved!');
+        break;
+      } else {
+        console.log('❌ Cloudflare checkbox click failed, continuing...');
+      }
       continue;
     } else if (userChoice === 'auto' && captchaService) {
       console.log('🤖 Retrying automated CAPTCHA solving...');
@@ -476,5 +499,85 @@ export const attemptAutomatedSolving = async (page: Page, captchaService: Captch
       method: 'automated',
       error: String(error)
     };
+  }
+};
+
+/**
+ * Click Cloudflare checkbox if it's a simple challenge
+ */
+export const clickCloudflareCheckbox = async (page: Page): Promise<boolean> => {
+  try {
+    console.log('🔍 Looking for Cloudflare checkbox...');
+    
+    // Common selectors for Cloudflare checkbox
+    const checkboxSelectors = [
+      'input[type="checkbox"]', // Simple checkbox
+      'input[type="checkbox"][id*="challenge"]',
+      'input[type="checkbox"][name*="cf"]',
+      'input[type="checkbox"][class*="challenge"]',
+      '.cf-turnstile input[type="checkbox"]',
+      '.challenge-form input[type="checkbox"]',
+      '#challenge-form input[type="checkbox"]',
+      'label input[type="checkbox"]'
+    ];
+    
+    for (const selector of checkboxSelectors) {
+      try {
+        console.log(`🔍 Trying checkbox selector: ${selector}`);
+        const checkbox = await page.$(selector);
+        
+        if (checkbox) {
+          // Check if the checkbox is visible and not already checked
+          const isVisible = await checkbox.isIntersectingViewport();
+          const isChecked = await checkbox.evaluate((el) => (el as HTMLInputElement).checked);
+          
+          console.log(`📋 Found checkbox - Visible: ${isVisible}, Checked: ${isChecked}`);
+          
+          if (isVisible && !isChecked) {
+            console.log(`✅ Clicking Cloudflare checkbox with selector: ${selector}`);
+            await checkbox.click();
+            
+            // Wait for potential processing
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Check if the challenge is resolving
+            const postClickStatus = await detectCaptcha(page);
+            if (!postClickStatus.hasCaptcha) {
+              console.log('🎉 Cloudflare challenge cleared after checkbox click!');
+              return true;
+            } else {
+              console.log('⏳ Checkbox clicked, waiting for challenge to process...');
+              // Wait a bit longer for Cloudflare to process
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              
+              const finalStatus = await detectCaptcha(page);
+              if (!finalStatus.hasCaptcha) {
+                console.log('🎉 Cloudflare challenge cleared!');
+                return true;
+              }
+            }
+          } else if (isChecked) {
+            console.log('✅ Checkbox is already checked, waiting for processing...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            const status = await detectCaptcha(page);
+            if (!status.hasCaptcha) {
+              console.log('🎉 Cloudflare challenge cleared!');
+              return true;
+            }
+          }
+        }
+      } catch (error) {
+        console.log(`❌ Error with checkbox selector ${selector}:`, error);
+        continue;
+      }
+    }
+    
+    console.log('❌ No clickable Cloudflare checkbox found');
+    return false;
+    
+  } catch (error) {
+    console.log('❌ Error in clickCloudflareCheckbox:', error);
+    return false;
   }
 };
