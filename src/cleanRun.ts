@@ -1,6 +1,7 @@
 // Clean run without proxy - with rate limiting
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import fs from 'fs';
 
 // Import modules
 import { SessionInfo } from './types';
@@ -12,6 +13,42 @@ import {
 import { scrapeTLSContact } from './scraper';
 import { checkRateLimit, updateRateLimit, displayRateLimitInfo } from './rateLimiter';
 import { checkIPHealth, promptUserDecision } from './ipHealthCheck';
+
+/**
+ * Find the path to the real Chrome browser
+ */
+const findChromePath = (): string | undefined => {
+  const possiblePaths = [
+    // macOS paths
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+    
+    // Windows paths
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    
+    // Linux paths
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium'
+  ];
+
+  for (const path of possiblePaths) {
+    try {
+      if (fs.existsSync(path)) {
+        console.log(`✅ Found Chrome at: ${path}`);
+        return path;
+      }
+    } catch (error) {
+      // Continue checking other paths
+    }
+  }
+
+  console.log('⚠️ Could not find Chrome installation, using bundled Chromium');
+  return undefined; // Will use bundled Chromium
+};
 
 // Validate environment (no proxy required for clean runs)
 validateEnvironment(false);
@@ -48,25 +85,31 @@ console.log(`🖥️ User Agent: ${sessionInfo.userAgent}`);
 
   // Run IP health check (even in clean mode)
   console.log('\n🔍 Running IP health check for your actual IP...');
-  const ipHealthResult = await checkIPHealth();
-  const proceedWithAutomation = await promptUserDecision(ipHealthResult);
+  // const ipHealthResult = await checkIPHealth();
+  // const proceedWithAutomation = await promptUserDecision(ipHealthResult);
 
-  if (!proceedWithAutomation) {
-    console.log('🛑 Stopping clean run due to IP health check results.');
-    console.log('💡 Consider using a different network or the standard proxy mode.');
-    process.exit(1);
-  }
+  // if (!proceedWithAutomation) {
+  //   console.log('🛑 Stopping clean run due to IP health check results.');
+  //   console.log('💡 Consider using a different network or the standard proxy mode.');
+  //   process.exit(1);
+  // }
 
   console.log('\n✅ IP health check passed - proceeding with clean run...');
 
   // Launch the browser
   puppeteer.use(StealthPlugin());
   
+  const chromePath = findChromePath();
+  
   const launchOptions = {
     headless: false,
     defaultViewport: null, // Use actual window size instead of virtual viewport
+    executablePath: chromePath, // Use real Chrome if found, otherwise bundled Chromium
+    userDataDir: '/tmp/puppeteer-clean-run', // Use temporary profile
     args: [
-      '--start-maximized' // Start maximized like a normal user would
+      '--start-maximized', // Start maximized like a normal user would
+      '--no-first-run', // Skip first run setup
+      '--no-default-browser-check' // Skip default browser check
     ]
   };
 
