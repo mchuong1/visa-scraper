@@ -345,11 +345,11 @@ export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Pr
     const isChecked = await checkbox.evaluate(el => (el as HTMLInputElement).checked);
     console.log(`📋 Checkbox current state: ${isChecked ? 'checked' : 'unchecked'}`);
     
-    if (!isChecked) {
+    if (isChecked) {
       await checkbox.click();
-      console.log('✅ Checkbox checked successfully!');
+      console.log('✅ Checkbox unchecked successfully!');
     } else {
-      console.log('✅ Checkbox is already checked!');
+      console.log('✅ Checkbox is already unchecked!');
     }
   }
 
