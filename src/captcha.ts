@@ -67,16 +67,16 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
     }
     
     // Try clicking Cloudflare checkbox if it's a simple challenge
-    if (captchaStatus.type.includes('cloudflare')) {
-      console.log('🔘 Attempting to click Cloudflare checkbox...');
-      const checkboxClicked = await clickCloudflareCheckbox(page);
-      if (checkboxClicked) {
-        console.log('✅ Cloudflare checkbox challenge resolved!');
-        break;
-      } else {
-        console.log('❌ Cloudflare checkbox click failed, continuing to manual options...');
-      }
-    }
+    // if (captchaStatus.type.includes('cloudflare')) {
+    //   console.log('🔘 Attempting to click Cloudflare checkbox...');
+    //   const checkboxClicked = await clickCloudflareCheckbox(page);
+    //   if (checkboxClicked) {
+    //     console.log('✅ Cloudflare checkbox challenge resolved!');
+    //     break;
+    //   } else {
+    //     console.log('❌ Cloudflare checkbox click failed, continuing to manual options...');
+    //   }
+    // }
     
     // Give user options for handling CAPTCHA (manual fallback)
     console.log('🔧 CAPTCHA Options:');
