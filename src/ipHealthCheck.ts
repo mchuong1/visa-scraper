@@ -2,7 +2,33 @@
 
 import { IPHealthResult } from './types';
 import { getUserChoice } from './helpers';
-import { tlsURL } from './config';
+import { tlsURL, PROXY_HOST, PROXY_USERNAME, PROXY_PASSWORD } from './config';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import fetch from 'node-fetch';
+
+/**
+ * Create proxy agent if proxy is configured
+ */
+const createProxyAgent = (): any => {
+  if (PROXY_HOST && PROXY_USERNAME && PROXY_PASSWORD) {
+    const proxyUrl = `http://${PROXY_USERNAME}:${PROXY_PASSWORD}@${PROXY_HOST}`;
+    console.log(`🌐 Using proxy: ${PROXY_HOST} (configured)`);
+    return new HttpsProxyAgent(proxyUrl);
+  }
+  console.log('📡 No proxy configured, using direct connection');
+  return undefined;
+};
+
+/**
+ * Create fetch options with proxy if available
+ */
+const createFetchOptions = (additionalOptions: any = {}): any => {
+  const agent = createProxyAgent();
+  return {
+    ...additionalOptions,
+    agent: agent
+  };
+};
 
 /**
  * Perform comprehensive IP health check
@@ -27,9 +53,9 @@ export const checkIPHealth = async (): Promise<IPHealthResult> => {
   };
 
   try {
-    // Step 1: Get IP information from ipinfo.io
+    // Step 1: Get IP information from ipinfo.io (through proxy if configured)
     console.log('📍 Step 1: Checking IP geolocation and ISP...');
-    const ipInfoResponse = await fetch('https://ipinfo.io/json');
+    const ipInfoResponse = await fetch('https://ipinfo.io/json', createFetchOptions());
     const ipInfo = await ipInfoResponse.json();
     
     result.ip = ipInfo.ip;
@@ -48,11 +74,15 @@ export const checkIPHealth = async (): Promise<IPHealthResult> => {
     console.log('🛡️ Step 2: Checking proxy/VPN detection...');
     await checkProxyDetection(result);
 
-    // Step 3: Check IP reputation and blacklists
-    console.log('🚫 Step 3: Checking IP reputation and blacklists...');
+    // Step 3: Test actual connectivity to TLS website (most important check)
+    console.log('🌐 Step 3: Testing actual TLS website connectivity...');
+    await testTLSConnectivity(result);
+
+    // Step 4: Check IP reputation and blacklists
+    console.log('🚫 Step 4: Checking IP reputation and blacklists...');
     await checkIPReputation(result);
 
-    // Step 4: Analyze results and make recommendation
+    // Step 5: Analyze results and make recommendation
     analyzeIPHealth(result);
 
     return result;
@@ -70,35 +100,36 @@ export const checkIPHealth = async (): Promise<IPHealthResult> => {
  */
 const checkProxyDetection = async (result: IPHealthResult): Promise<void> => {
   try {
-    // Check with IP2Location (free tier)
-    const ip2locationUrl = `http://ip-api.com/json/${result.ip}?fields=status,proxy,hosting`;
-    const proxyResponse = await fetch(ip2locationUrl);
-    const proxyData = await proxyResponse.json();
-    
-    if (proxyData.status === 'success') {
-      result.risks.isProxy = proxyData.proxy || false;
-      result.risks.isVPN = proxyData.hosting || false;
-      
-      if (proxyData.proxy) {
-        result.details.push('⚠️ IP detected as proxy by ip-api.com');
-      }
-      if (proxyData.hosting) {
-        result.details.push('⚠️ IP detected as hosting/datacenter by ip-api.com');
-      }
-    }
+    // Check with multiple IP detection services for better accuracy
+    await Promise.all([
+      checkIPAPI(result),
+      checkIPInfo(result),
+      checkIPQualityScore(result)
+    ]);
 
-    // Additional proxy detection patterns
+    // Additional ISP-based detection with expanded patterns
     const ispLower = result.location.isp.toLowerCase();
     const suspiciousISPs = [
-      'hosting', 'datacenter', 'cloud', 'server', 'virtual', 'proxy',
-      'vpn', 'amazon', 'google cloud', 'microsoft', 'digitalocean',
-      'linode', 'vultr', 'ovh', 'hetzner'
+      // Hosting providers (high CAPTCHA risk)
+      'hosting', 'datacenter', 'data center', 'cloud', 'server', 'virtual', 'proxy',
+      'vpn', 'amazon', 'aws', 'google cloud', 'gcp', 'microsoft', 'azure',
+      'digitalocean', 'linode', 'vultr', 'ovh', 'hetzner', 'contabo',
+      'godaddy', 'namecheap', 'hostgator', 'bluehost', 'cloudflare',
+      
+      // VPN providers (very high CAPTCHA risk)
+      'nordvpn', 'expressvpn', 'surfshark', 'cyberghost', 'ipvanish',
+      'purevpn', 'hidemyass', 'tunnelbear', 'windscribe', 'protonvpn',
+      
+      // Proxy services (very high CAPTCHA risk)
+      'bright data', 'luminati', 'oxylabs', 'smartproxy', 'blazingseollc',
+      'storm proxies', 'rotating', 'residential proxy', 'datacenter proxy'
     ];
 
     for (const suspicious of suspiciousISPs) {
       if (ispLower.includes(suspicious)) {
         result.risks.isVPN = true;
         result.details.push(`⚠️ ISP contains suspicious keyword: "${suspicious}"`);
+        result.risks.fraudScore += 35; // Higher penalty for ISP detection
         break;
       }
     }
@@ -110,49 +141,281 @@ const checkProxyDetection = async (result: IPHealthResult): Promise<void> => {
 };
 
 /**
+ * Check IP-API.com for proxy/VPN detection
+ */
+const checkIPAPI = async (result: IPHealthResult): Promise<void> => {
+  try {
+    const url = `http://ip-api.com/json/${result.ip}?fields=status,proxy,hosting,mobile,query`;
+    const response = await fetch(url, createFetchOptions());
+    const data = await response.json();
+    
+    if (data.status === 'success') {
+      if (data.proxy) {
+        result.risks.isProxy = true;
+        result.details.push('🔍 IP-API: Detected as proxy');
+        result.risks.fraudScore += 40;
+      }
+      if (data.hosting) {
+        result.risks.isVPN = true;
+        result.details.push('🔍 IP-API: Detected as hosting/datacenter');
+        result.risks.fraudScore += 35;
+      }
+      if (data.mobile) {
+        result.details.push('📱 IP-API: Mobile IP detected');
+        result.risks.fraudScore += 10; // Mobile IPs can be problematic
+      }
+    }
+  } catch (error) {
+    console.log('⚠️ IP-API check failed');
+  }
+};
+
+/**
+ * Check IPInfo.io for additional data
+ */
+const checkIPInfo = async (result: IPHealthResult): Promise<void> => {
+  try {
+    const response = await fetch(`https://ipinfo.io/${result.ip}/json`, createFetchOptions());
+    const data = await response.json();
+    
+    // Check for hosting/datacenter indicators
+    if (data.org) {
+      const orgLower = data.org.toLowerCase();
+      if (orgLower.includes('hosting') || orgLower.includes('datacenter') || 
+          orgLower.includes('cloud') || orgLower.includes('server')) {
+        result.risks.isVPN = true;
+        result.details.push('🔍 IPInfo: Organization indicates hosting/datacenter');
+        result.risks.fraudScore += 30;
+      }
+    }
+    
+    // Check anycast networks (often problematic)
+    if (data.anycast) {
+      result.details.push('🔍 IPInfo: Anycast network detected');
+      result.risks.fraudScore += 20;
+    }
+  } catch (error) {
+    console.log('⚠️ IPInfo check failed');
+  }
+};
+
+/**
+ * Check IP Quality Score (simulate with additional checks)
+ */
+const checkIPQualityScore = async (result: IPHealthResult): Promise<void> => {
+  try {
+    // Use additional endpoint for more comprehensive check
+    const url = `https://check-host.net/ip-info?host=${result.ip}`;
+    const response = await fetch(url, createFetchOptions());
+    
+    // If we can't reach certain endpoints, it might indicate blocking
+    if (!response.ok) {
+      result.details.push('⚠️ Network connectivity issues detected');
+      result.risks.fraudScore += 15;
+    }
+    
+    // Check for common proxy ports being open (heuristic)
+    await checkCommonProxyPorts(result);
+    
+  } catch (error) {
+    console.log('⚠️ Additional IP checks failed');
+  }
+};
+
+/**
+ * Test actual connectivity to TLS website
+ */
+const testTLSConnectivity = async (result: IPHealthResult): Promise<void> => {
+  try {
+    console.log('🌐 Testing actual connectivity to TLS website...');
+    
+    const startTime = Date.now();
+    
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    
+    const fetchOptions = createFetchOptions({
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      },
+      signal: controller.signal
+    });
+    
+    const response = await fetch(tlsURL, fetchOptions);
+    
+    clearTimeout(timeoutId);
+    const responseTime = Date.now() - startTime;
+    const responseText = await response.text();
+    
+    // Analyze response for CAPTCHA indicators
+    const captchaIndicators = [
+      'captcha', 'recaptcha', 'cloudflare', 'challenge',
+      'blocked', 'access denied', 'rate limit', 'bot detection',
+      'please verify', 'security check', 'cf-ray'
+    ];
+    
+    const responseTextLower = responseText.toLowerCase();
+    let captchaDetected = false;
+    
+    for (const indicator of captchaIndicators) {
+      if (responseTextLower.includes(indicator)) {
+        captchaDetected = true;
+        result.details.push(`🚨 CAPTCHA/Block indicator found: "${indicator}"`);
+        result.risks.fraudScore += 50; // Very high penalty for actual detection
+        break;
+      }
+    }
+    
+    // Check response codes
+    if (response.status === 403) {
+      result.details.push('🚨 HTTP 403 Forbidden - IP likely blocked');
+      result.risks.fraudScore += 60;
+      captchaDetected = true;
+    } else if (response.status === 429) {
+      result.details.push('🚨 HTTP 429 Rate Limited - IP flagged');
+      result.risks.fraudScore += 50;
+      captchaDetected = true;
+    } else if (response.status !== 200) {
+      result.details.push(`⚠️ HTTP ${response.status} - Unusual response`);
+      result.risks.fraudScore += 20;
+    }
+    
+    // Check response time (very slow responses might indicate challenges)
+    if (responseTime > 10000) {
+      result.details.push(`⚠️ Slow response time: ${responseTime}ms (possible challenge)`);
+      result.risks.fraudScore += 15;
+    } else if (responseTime < 1000) {
+      result.details.push(`✅ Fast response time: ${responseTime}ms`);
+    }
+    
+    // Check for normal TLS website indicators
+    if (responseTextLower.includes('tlscontact') && responseTextLower.includes('visa')) {
+      if (!captchaDetected) {
+        result.details.push('✅ Successfully loaded TLS website without blocks');
+      }
+    } else if (!captchaDetected) {
+      result.details.push('⚠️ Unexpected response content - possible redirect or block');
+      result.risks.fraudScore += 25;
+    }
+    
+  } catch (error: any) {
+    console.log('⚠️ TLS connectivity test failed:', error.message);
+    result.details.push('❌ Failed to connect to TLS website');
+    result.risks.fraudScore += 40; // High penalty for connection failure
+  }
+};
+
+/**
+ * Heuristic check for common proxy ports
+ */
+const checkCommonProxyPorts = async (result: IPHealthResult): Promise<void> => {
+  // This is a simplified heuristic - in practice, port scanning would require special tools
+  // We'll use the IP pattern to estimate likelihood
+  const ipParts = result.ip.split('.');
+  const lastOctet = parseInt(ipParts[3]);
+  
+  // IPs ending in common proxy ports are suspicious
+  const suspiciousPorts = [80, 8080, 3128, 1080, 8888, 9999];
+  if (suspiciousPorts.includes(lastOctet)) {
+    result.details.push(`⚠️ IP ends in suspicious port number: ${lastOctet}`);
+    result.risks.fraudScore += 10;
+  }
+};
+
+/**
  * Check IP reputation and blacklists
  */
 const checkIPReputation = async (result: IPHealthResult): Promise<void> => {
   try {
-    // Check with AbuseIPDB-style reputation (using a public API)
+    // Check with AbuseIPDB-style reputation (using a public API through proxy)
     const reputationUrl = `http://ip-api.com/json/${result.ip}?fields=status,isp,org,as,mobile,proxy,hosting,query`;
-    const reputationResponse = await fetch(reputationUrl);
+    const reputationResponse = await fetch(reputationUrl, createFetchOptions());
     const reputationData = await reputationResponse.json();
     
     if (reputationData.status === 'success') {
-      // Check for mobile carrier (mobile IPs are often problematic)
+      // Check for mobile carrier (mobile IPs are often problematic for automation)
       if (reputationData.mobile) {
-        result.details.push('📱 Mobile IP detected - may have restrictions');
+        result.details.push('📱 Mobile IP detected - higher CAPTCHA risk');
+        result.risks.fraudScore += 25; // Increased penalty for mobile
       }
 
-      // Check ASN for known problematic networks
+      // Check ASN for known problematic networks with higher penalties
       const asn = reputationData.as || '';
       const problematicASNs = [
-        'Cloudflare', 'Amazon', 'Google', 'Microsoft',
-        'DigitalOcean', 'Linode', 'Vultr'
+        { name: 'Cloudflare', penalty: 45 },
+        { name: 'Amazon', penalty: 40 },
+        { name: 'Google', penalty: 40 },
+        { name: 'Microsoft', penalty: 40 },
+        { name: 'DigitalOcean', penalty: 50 },
+        { name: 'Linode', penalty: 50 },
+        { name: 'Vultr', penalty: 50 },
+        { name: 'OVH', penalty: 45 },
+        { name: 'Hetzner', penalty: 45 }
       ];
 
       for (const problematic of problematicASNs) {
-        if (asn.includes(problematic)) {
+        if (asn.includes(problematic.name)) {
           result.risks.isVPN = true;
-          result.details.push(`⚠️ ASN indicates cloud provider: ${problematic}`);
+          result.details.push(`⚠️ ASN indicates high-risk cloud provider: ${problematic.name}`);
+          result.risks.fraudScore += problematic.penalty;
           break;
         }
       }
     }
 
-    // Simulate fraud score based on detected issues
-    let fraudScore = 0;
-    if (result.risks.isProxy) fraudScore += 30;
-    if (result.risks.isVPN) fraudScore += 25;
-    if (result.location.isp.toLowerCase().includes('hosting')) fraudScore += 20;
-    if (result.location.country === 'Unknown') fraudScore += 15;
+    // Additional residential IP checks
+    await checkResidentialIP(result);
 
-    result.risks.fraudScore = Math.min(fraudScore, 100);
+    // Recalculate fraud score with better weights for CAPTCHA prediction
+    result.risks.fraudScore = Math.min(result.risks.fraudScore, 100);
 
   } catch (error) {
     console.log('⚠️ Could not complete IP reputation check');
     result.details.push('IP reputation check failed');
+    result.risks.fraudScore += 10; // Small penalty for check failure
+  }
+};
+
+/**
+ * Check if IP appears to be residential vs datacenter
+ */
+const checkResidentialIP = async (result: IPHealthResult): Promise<void> => {
+  try {
+    // Heuristics for residential IP detection
+    const isp = result.location.isp.toLowerCase();
+    
+    // Common residential ISP patterns
+    const residentialPatterns = [
+      'broadband', 'cable', 'dsl', 'fiber', 'telecom', 'internet',
+      'communications', 'comcast', 'verizon', 'at&t', 'charter',
+      'cox', 'spectrum', 'bt group', 'virgin', 'sky', 'vodafone',
+      'orange', 'telefonica', 'deutsche telekom', 'o2'
+    ];
+    
+    const isLikelyResidential = residentialPatterns.some(pattern => 
+      isp.includes(pattern)
+    );
+    
+    if (isLikelyResidential) {
+      result.details.push('🏠 Appears to be residential IP - lower CAPTCHA risk');
+      result.risks.fraudScore = Math.max(0, result.risks.fraudScore - 20); // Bonus for residential
+    } else {
+      // If not clearly residential and not already flagged as hosting, add suspicion
+      if (!result.risks.isVPN && !isp.includes('mobile')) {
+        result.details.push('🏢 Non-residential ISP pattern detected');
+        result.risks.fraudScore += 15;
+      }
+    }
+    
+  } catch (error) {
+    console.log('⚠️ Residential IP check failed');
   }
 };
 

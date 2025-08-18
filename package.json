@@ -12,6 +12,8 @@
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.5",
+    "https-proxy-agent": "^7.0.6",
+    "node-fetch": "^2.7.0",
     "puppeteer": "^22.6.2",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
@@ -20,7 +22,8 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.12.2",
+    "@types/node": "^20.19.11",
+    "@types/node-fetch": "^2.6.13",
     "@types/puppeteer": "^7.0.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.3"
