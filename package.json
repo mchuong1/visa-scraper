@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "npx tsc",
-    "start": "npx tsc && node build/index.js"
+    "start": "npx tsc && node build/index.js",
+    "clean": "npx tsc && node build/cleanRun.js"
   },
   "author": "Matthew Chuong",
   "license": "ISC",

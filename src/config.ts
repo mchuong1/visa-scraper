@@ -22,10 +22,17 @@ export const userAgentList = [
 ];
 
 // Validate required environment variables
-export const validateEnvironment = (): void => {
-  if (!PROXY_HOST || !PROXY_USERNAME || !PROXY_PASSWORD) {
-    console.error('❌ Missing required environment variables. Please check your .env file.');
+export const validateEnvironment = (requireProxy: boolean = true): void => {
+  if (requireProxy && (!PROXY_HOST || !PROXY_USERNAME || !PROXY_PASSWORD)) {
+    console.error('❌ Missing required proxy environment variables. Please check your .env file.');
     console.error('Required: PROXY_HOST, PROXY_USERNAME, PROXY_PASSWORD');
+    process.exit(1);
+  }
+  
+  // Always check for TLS credentials
+  if (!process.env.TLS_USERNAME || !process.env.TLS_PASSWORD) {
+    console.error('❌ Missing required TLS Contact credentials. Please check your .env file.');
+    console.error('Required: TLS_USERNAME, TLS_PASSWORD');
     process.exit(1);
   }
 };

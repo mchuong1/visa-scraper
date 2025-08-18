@@ -67,9 +67,37 @@ cp .env.example .env
 
 4. **Build and run**
 ```bash
+# Standard run with proxy and full features
 npm run build
 npm start
+
+# Clean run without proxy (rate limited)
+npm run clean
 ```
+
+## 🧹 Clean Run Mode
+
+For testing purposes, you can run the scraper without proxy in "clean mode":
+
+```bash
+npm run clean
+```
+
+### Clean Mode Features:
+- **🚫 No Proxy**: Direct connection to website
+- **⏱️ Rate Limited**: Automatic 15-minute cooldown between runs
+- **🔒 Anti-Spam Protection**: Prevents rapid consecutive requests
+- **⚡ Simplified Flow**: Skips IP health checks for faster testing
+
+### Rate Limiting:
+- Only one run allowed every 15 minutes
+- Automatic tracking in `.last-run-timestamp` file
+- Clear error messages when rate limit is active
+- Helps avoid being flagged as a bot
+
+**⚠️ Note**: Clean mode is for testing only. Use standard mode with proxy for production automation.
+
+📖 **[Read the Complete Clean Mode Guide →](CLEAN_MODE_GUIDE.md)**
 
 ## ⚙️ Configuration
 

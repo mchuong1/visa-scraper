@@ -14,8 +14,8 @@ import {
 import { checkIPHealth, promptUserDecision } from './ipHealthCheck';
 import { scrapeTLSContact } from './scraper';
 
-// Validate environment and initialize
-validateEnvironment();
+// Validate environment and initialize (require proxy for main index)
+validateEnvironment(true);
 
 // Session tracking
 const sessionInfo: SessionInfo = {
