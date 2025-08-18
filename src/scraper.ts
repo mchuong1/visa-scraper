@@ -199,14 +199,94 @@ const navigateToNextMonth = async (page: Page): Promise<boolean> => {
 };
 
 /**
+ * Check all available months for appointments automatically (TLS Contact specific)
+ */
+const checkAllMonthsForAppointments = async (page: Page): Promise<boolean> => {
+  console.log('🔄 Starting automatic month checking (TLS Contact: current + next 2 months)...');
+  
+  let monthsChecked = 0;
+  const maxMonthsToCheck = 3; // TLS Contact only shows current month + next 2 months
+  
+  while (monthsChecked < maxMonthsToCheck) {
+    monthsChecked++;
+    console.log(`\n📅 Checking month ${monthsChecked}/3...`);
+    
+    // Check current month for appointments
+    const appointmentsFound = await checkAppointmentAvailability(page);
+    
+    if (appointmentsFound) {
+      console.log('🎉 APPOINTMENTS FOUND! Stopping automatic checking.');
+      return true;
+    }
+    
+    console.log('📅 No appointments found in current month.');
+    
+    // Don't try to navigate if we've already checked all 3 months
+    if (monthsChecked >= maxMonthsToCheck) {
+      console.log('📅 Checked all available months (current + next 2).');
+      break;
+    }
+    
+    // Try to navigate to next month
+    console.log('🔄 Automatically navigating to next month...');
+    const navigated = await navigateToNextMonth(page);
+    
+    if (!navigated) {
+      console.log('📅 Reached end of available months or cannot navigate further.');
+      console.log(`✅ Checked ${monthsChecked} month(s) total.`);
+      return false;
+    }
+    
+    // Wait for page to stabilize after navigation
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Perform human-like movements between month checks
+    await performHumanLikeMovements(page);
+  }
+  
+  console.log(`✅ Completed checking all ${maxMonthsToCheck} available months.`);
+  return false;
+};
+
+/**
+ * Reset to the first month (current month) by refreshing the page
+ */
+const resetToFirstMonth = async (page: Page): Promise<void> => {
+  console.log('🔄 Resetting to first month (current month)...');
+  
+  try {
+    // Refresh page to go back to current month
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+    
+    // Wait for page to stabilize
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    console.log('✅ Successfully reset to current month');
+  } catch (error) {
+    console.log('⚠️ Error resetting to first month:', error);
+    console.log('🔄 Trying alternative reset method...');
+    
+    // Alternative: navigate to the base URL
+    try {
+      await page.goto(page.url(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log('✅ Reset completed using navigation');
+    } catch (navError) {
+      console.log('❌ Reset failed, continuing anyway:', navError);
+    }
+  }
+};
+
+/**
  * Continuously monitor for appointment availability
  */
 const monitorAppointments = async (page: Page): Promise<void> => {
-  console.log('🔄 Starting appointment monitoring...');
+  console.log('🔄 Starting continuous appointment monitoring for TLS Contact...');
+  console.log('ℹ️ TLS Contact shows current month + next 2 months only');
   
   while (true) {
-    // Check for appointments on current page
-    const appointmentsFound = await checkAppointmentAvailability(page);
+    // Check all 3 available months automatically
+    const appointmentsFound = await checkAllMonthsForAppointments(page);
     
     if (appointmentsFound) {
       console.log('🎉 APPOINTMENTS FOUND! Stopping monitoring.');
@@ -214,55 +294,20 @@ const monitorAppointments = async (page: Page): Promise<void> => {
       break;
     }
     
-    console.log('📅 No appointments available on current page.');
+    console.log('📅 No appointments found in any of the 3 available months.');
     
-    // Give user options for what to do next
-    console.log('\n🤔 What would you like to do next?');
-    console.log('   1. Press ENTER to refresh current page and check again');
-    console.log('   2. Type "next" to try navigating to next month');
-    console.log('   3. Type "stop" to stop monitoring');
-    console.log('   4. Type "manual" to manually navigate to a different month');
+    // Reset back to first month before waiting
+    await resetToFirstMonth(page);
     
-    const readline = require('readline');
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
-    const choice = await new Promise<string>((resolve) => {
-      rl.question('⏳ Your choice: ', (answer: string) => {
-        rl.close();
-        resolve(answer.trim().toLowerCase());
-      });
-    });
-
-    if (choice === 'stop') {
-      console.log('🛑 Stopping monitoring as requested...');
-      break;
-    } else if (choice === 'next') {
-      console.log('🔄 Attempting to navigate to next month...');
-      const navigated = await navigateToNextMonth(page);
-      if (!navigated) {
-        console.log('❌ Could not navigate to next month. Please try manual navigation.');
-        continue;
-      }
-      // Wait for page to stabilize after navigation
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    } else if (choice === 'manual') {
-      console.log('🔧 Manual navigation mode:');
-      console.log('⏳ Please manually navigate to the month you want to check, then press ENTER...');
-      await waitForUserInput();
-    } else {
-      // Default: refresh current page
-      console.log('🔄 Refreshing current page...');
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      
-      // Wait for page to stabilize after refresh
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    }
+    // Wait before starting the next cycle
+    console.log('⏳ Waiting 5 minutes before checking all months again...');
+    const waitTime = 5 * 60 * 1000; // 5 minutes
+    const nextCheckTime = new Date(Date.now() + waitTime);
+    console.log(`🕐 Next check cycle at: ${nextCheckTime.toLocaleString()}`);
     
-    // Perform human-like movements before next check
-    await performHumanLikeMovements(page);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+    
+    console.log('🔄 Starting new monitoring cycle...');
   }
 };
 
