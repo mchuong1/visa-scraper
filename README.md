@@ -85,6 +85,7 @@ npm run clean
 
 ### Clean Mode Features:
 - **🚫 No Proxy**: Direct connection to website
+- **🌐 Real Browser**: Uses your actual Chrome installation instead of bundled Chromium
 - **🔍 IP Health Check**: Analyzes your actual IP for risks
 - **⏱️ Rate Limited**: Automatic 15-minute cooldown between runs
 - **🔒 Anti-Spam Protection**: Prevents rapid consecutive requests

@@ -65,6 +65,33 @@ npm run clean
 🎯 Recommendation: ✅ SAFE - Proceed with automation
 ```
 
+## Real Browser Usage
+
+### Automatic Chrome Detection
+Clean mode automatically detects and uses your real Chrome installation:
+
+```
+✅ Found Chrome at: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+🚀 Launching browser without proxy...
+```
+
+### Supported Browsers (in order of preference):
+1. **Google Chrome** - Primary choice for maximum compatibility
+2. **Chromium** - Open-source alternative
+3. **Google Chrome Canary** - Developer version
+4. **Bundled Chromium** - Fallback if no Chrome found
+
+### Benefits of Real Browser:
+- **🔍 Better Detection Evasion**: Real browser fingerprint vs automation
+- **🔄 Natural Behavior**: Uses your actual browser profile characteristics
+- **🛡️ Enhanced Stealth**: No automation-specific flags or behaviors
+- **⚡ Performance**: Often faster than bundled Chromium
+
+### Browser Profile:
+- Uses temporary profile (`/tmp/puppeteer-clean-run`) to avoid interfering with your regular browsing
+- Starts maximized like normal user behavior
+- Skips first-run setup for cleaner automation
+
 ## Rate Limiting
 
 ### How It Works
