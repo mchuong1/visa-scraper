@@ -33,3 +33,11 @@ export interface CaptchaDetectionResult {
   hasCaptcha: boolean;
   type: string;
 }
+
+export interface AutomatedCaptchaResult {
+  solved: boolean;
+  method: 'automated' | 'manual' | 'skipped';
+  service?: 'twocaptcha' | 'anticaptcha';
+  timeSpent?: number;
+  error?: string;
+}

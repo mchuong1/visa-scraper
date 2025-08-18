@@ -10,7 +10,9 @@ import {
   getRandomUserAgent, 
   PROXY_HOST, 
   PROXY_USERNAME, 
-  PROXY_PASSWORD 
+  PROXY_PASSWORD,
+  TWOCAPTCHA_API_KEY,
+  ANTICAPTCHA_API_KEY 
 } from './config';
 import { checkIPHealth, promptUserDecision } from './ipHealthCheck';
 import { scrapeTLSContact } from './scraper';
@@ -64,6 +66,16 @@ const sessionInfo: SessionInfo = {
 };
 
 console.log(`🌐 Selected User Agent: ${sessionInfo.userAgent}`);
+
+// Display CAPTCHA service status
+if (TWOCAPTCHA_API_KEY || ANTICAPTCHA_API_KEY) {
+  console.log('🤖 Automated CAPTCHA solving: ✅ ENABLED');
+  if (TWOCAPTCHA_API_KEY) console.log('   - 2Captcha service: ✅ Configured');
+  if (ANTICAPTCHA_API_KEY) console.log('   - Anti-Captcha service: ✅ Configured');
+} else {
+  console.log('🤖 Automated CAPTCHA solving: ❌ DISABLED');
+  console.log('   💡 Add TWOCAPTCHA_API_KEY or ANTICAPTCHA_API_KEY to .env for automation');
+}
 
 (async () => {
   // Launch the browser and open a new blank page

@@ -7,6 +7,11 @@ export const PROXY_HOST = process.env.PROXY_HOST || '';
 export const PROXY_USERNAME = process.env.PROXY_USERNAME || '';
 export const PROXY_PASSWORD = process.env.PROXY_PASSWORD || '';
 
+// CAPTCHA service API keys
+export const TWOCAPTCHA_API_KEY = process.env.TWOCAPTCHA_API_KEY || '';
+export const ANTICAPTCHA_API_KEY = process.env.ANTICAPTCHA_API_KEY || '';
+export const PREFERRED_CAPTCHA_SERVICE = process.env.PREFERRED_CAPTCHA_SERVICE as 'twocaptcha' | 'anticaptcha' | 'auto' || 'auto';
+
 // URLs
 export const tlsURL = 'https://visas-de.tlscontact.com/visa/gb/gbLON2de/home';
 export const vfsURL = 'https://visa.vfsglobal.com/gbr/en/prt/login';
@@ -34,6 +39,12 @@ export const validateEnvironment = (requireProxy: boolean = true): void => {
     console.error('❌ Missing required TLS Contact credentials. Please check your .env file.');
     console.error('Required: TLS_USERNAME, TLS_PASSWORD');
     process.exit(1);
+  }
+
+  // Check for CAPTCHA service credentials (at least one should be provided)
+  if (!TWOCAPTCHA_API_KEY && !ANTICAPTCHA_API_KEY) {
+    console.warn('⚠️ No CAPTCHA service API keys found. Automated CAPTCHA solving will not be available.');
+    console.warn('Add TWOCAPTCHA_API_KEY or ANTICAPTCHA_API_KEY to your .env file for automated solving.');
   }
 };
 

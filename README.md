@@ -11,15 +11,19 @@ A sophisticated, enterprise-level visa appointment scraper with comprehensive CA
 - **Human-like Behavior**: Mouse movements, scrolling, and realistic timing
 
 ### 🤖 **Comprehensive CAPTCHA Handling**
-- **Multi-Type Detection**: reCAPTCHA, hCAPTCHA, Turnstile, Cloudflare challenges
-- **7-Option Bypass System**:
-  1. Manual solving with user input
-  2. Skip detection and continue
-  3. Page refresh strategies
-  4. 2-minute wait for rate limiting
-  5. Cookie/cache clearing
-  6. Stealth reload with fingerprint reset
-  7. Human behavior simulation
+- **Multi-Type Detection**: reCAPTCHA v2/v3, hCAPTCHA, Turnstile, Cloudflare challenges
+- **Automated Solving**: Integration with 2Captcha and Anti-Captcha services
+- **8-Option Bypass System**:
+  1. **Automated solving** using CAPTCHA services (NEW!)
+  2. Manual solving with user input
+  3. Skip detection and continue
+  4. Page refresh strategies
+  5. 2-minute wait for rate limiting
+  6. Cookie/cache clearing
+  7. Stealth reload with fingerprint reset
+  8. Human behavior simulation
+
+📖 **[Read the Complete CAPTCHA Integration Guide →](CAPTCHA_INTEGRATION_GUIDE.md)**
 
 ### 🔄 **Robust Error Recovery**
 - **Retry Mechanisms**: Auto-retry with exponential backoff
@@ -116,7 +120,38 @@ PROXY_PASSWORD=your_proxy_password
 # TLS Contact Credentials
 TLS_USERNAME=your_username
 TLS_PASSWORD=your_password
+
+# CAPTCHA Service API Keys (Optional - for automated solving)
+TWOCAPTCHA_API_KEY=your_2captcha_api_key
+ANTICAPTCHA_API_KEY=your_anticaptcha_api_key
+PREFERRED_CAPTCHA_SERVICE=auto
 ```
+
+### CAPTCHA Service Setup (Optional)
+
+For automated CAPTCHA solving, you can configure one or both services:
+
+#### 2Captcha Setup
+1. Sign up at [2captcha.com](https://2captcha.com/)
+2. Add funds to your account ($10 minimum recommended)
+3. Get your API key from the dashboard
+4. Add `TWOCAPTCHA_API_KEY=your_api_key` to your `.env` file
+
+#### Anti-Captcha Setup
+1. Sign up at [anti-captcha.com](https://anti-captcha.com/)
+2. Add funds to your account ($10 minimum recommended)  
+3. Get your API key from the dashboard
+4. Add `ANTICAPTCHA_API_KEY=your_api_key` to your `.env` file
+
+#### Service Comparison
+| Feature | 2Captcha | Anti-Captcha |
+|---------|----------|--------------|
+| **Price** | $1-3 per 1000 solves | $1-2 per 1000 solves |
+| **Speed** | 15-30 seconds | 10-25 seconds |
+| **Success Rate** | 95-98% | 96-99% |
+| **Supported Types** | All major CAPTCHAs | All major CAPTCHAs |
+
+**Recommendation**: Use `PREFERRED_CAPTCHA_SERVICE=auto` to automatically choose the best available service.
 
 ### Supported Websites
 - ✅ TLS Contact (Germany visa applications)
@@ -152,8 +187,25 @@ Based on the analysis, you'll get one of three recommendations:
 
 ### Interactive CAPTCHA Handling
 
-When a CAPTCHA is detected, you'll see these options:
+When a CAPTCHA is detected, the scraper will:
 
+1. **🤖 Try automated solving first** (if API keys are configured)
+2. **🔄 Fall back to manual options** if automated solving fails
+
+#### Automated Mode
+If you have configured CAPTCHA service API keys, you'll see:
+```
+🤖 CAPTCHA detected (Type: cloudflare-challenge) - Attempt 1/5
+🚀 Attempting automated CAPTCHA solving...
+💰 Checking CAPTCHA service balance...
+💰 2Captcha balance: $5.23
+🔧 Solving with 2Captcha...
+✅ 2Captcha solved successfully
+✅ CAPTCHA cleared! Continuing...
+```
+
+#### Manual Fallback Mode
+If automated solving fails or no API keys are provided:
 ```
 🔧 CAPTCHA Options:
    1. Solve manually and press ENTER to continue
@@ -163,6 +215,7 @@ When a CAPTCHA is detected, you'll see these options:
    5. Type "cookies" and press ENTER to clear cookies
    6. Type "stealth" and press ENTER to try stealth reload
    7. Type "human" and press ENTER for human-like browsing
+   8. Type "auto" and press ENTER to retry automated solving
 ```
 
 ### Manual Intervention Points

@@ -12,6 +12,8 @@
   "author": "Matthew Chuong",
   "license": "ISC",
   "dependencies": {
+    "2captcha": "^3.0.5-2",
+    "anticaptcha": "^2.2.0",
     "dotenv": "^16.4.5",
     "https-proxy-agent": "^7.0.6",
     "node-fetch": "^2.7.0",

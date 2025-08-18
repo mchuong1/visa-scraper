@@ -1,16 +1,33 @@
 // CAPTCHA detection and handling functionality
 
 import { Page } from 'puppeteer';
-import { CaptchaDetectionResult, SessionInfo } from './types';
+import { CaptchaDetectionResult, SessionInfo, AutomatedCaptchaResult } from './types';
 import { getUserChoice, waitForUserInput, clearBrowserData } from './helpers';
-import { userAgentList, tlsURL } from './config';
+import { userAgentList, tlsURL, TWOCAPTCHA_API_KEY, ANTICAPTCHA_API_KEY, PREFERRED_CAPTCHA_SERVICE } from './config';
+import { CaptchaService } from './captchaService';
 
 /**
- * Handle CAPTCHA loops with multiple strategies
+ * Handle CAPTCHA loops with multiple strategies including automated solving
  */
 export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): Promise<void> => {
   const maxCaptchaAttempts = 5;
   let captchaAttempt = 0;
+  
+  // Initialize CAPTCHA service if API keys are available
+  let captchaService: CaptchaService | null = null;
+  if (TWOCAPTCHA_API_KEY || ANTICAPTCHA_API_KEY) {
+    captchaService = new CaptchaService({
+      twoCaptchaApiKey: TWOCAPTCHA_API_KEY,
+      antiCaptchaApiKey: ANTICAPTCHA_API_KEY,
+      preferredService: PREFERRED_CAPTCHA_SERVICE,
+      maxSolveTime: 120000,
+      retryAttempts: 2
+    });
+    
+    // Check service balance
+    console.log('💰 Checking CAPTCHA service balance...');
+    await captchaService.checkBalance();
+  }
   
   while (captchaAttempt < maxCaptchaAttempts) {
     const captchaStatus = await detectCaptcha(page);
@@ -24,7 +41,32 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
     sessionInfo.captchaSolved++;
     console.log(`🤖 CAPTCHA detected (Type: ${captchaStatus.type}) - Attempt ${captchaAttempt}/${maxCaptchaAttempts}`);
     
-    // Give user options for handling CAPTCHA
+    // Try automated solving first if service is available
+    if (captchaService) {
+      console.log('🚀 Attempting automated CAPTCHA solving...');
+      const automatedResult = await attemptAutomatedSolving(page, captchaService);
+      
+      if (automatedResult.solved) {
+        console.log(`✅ CAPTCHA solved automatically using ${automatedResult.service} in ${automatedResult.timeSpent}ms`);
+        
+        // Wait for page to update after CAPTCHA solving
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Check if CAPTCHA is actually cleared
+        const postSolveStatus = await detectCaptcha(page);
+        if (!postSolveStatus.hasCaptcha) {
+          console.log('✅ CAPTCHA cleared! Continuing...');
+          break;
+        } else {
+          console.log('⚠️ CAPTCHA still detected after automated solving, falling back to manual mode...');
+        }
+      } else {
+        console.log(`❌ Automated solving failed: ${automatedResult.error}`);
+        console.log('🔄 Falling back to manual solving...');
+      }
+    }
+    
+    // Give user options for handling CAPTCHA (manual fallback)
     console.log('🔧 CAPTCHA Options:');
     console.log('   1. Solve manually and press ENTER to continue');
     console.log('   2. Type "skip" and press ENTER to skip CAPTCHA detection');
@@ -33,6 +75,9 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
     console.log('   5. Type "cookies" and press ENTER to clear cookies and try again');
     console.log('   6. Type "stealth" and press ENTER to try stealth reload');
     console.log('   7. Type "human" and press ENTER for human-like browsing simulation');
+    if (captchaService) {
+      console.log('   8. Type "auto" and press ENTER to retry automated solving');
+    }
     console.log('⏳ Your choice:');
     
     const userChoice = await getUserChoice();
@@ -65,6 +110,23 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
       console.log('👤 Simulating human browsing behavior...');
       await simulateHumanBehavior(page);
       continue;
+    } else if (userChoice === 'auto' && captchaService) {
+      console.log('🤖 Retrying automated CAPTCHA solving...');
+      const automatedResult = await attemptAutomatedSolving(page, captchaService);
+      
+      if (automatedResult.solved) {
+        console.log(`✅ CAPTCHA solved automatically using ${automatedResult.service}`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        const postSolveStatus = await detectCaptcha(page);
+        if (!postSolveStatus.hasCaptcha) {
+          console.log('✅ CAPTCHA cleared! Continuing...');
+          break;
+        }
+      } else {
+        console.log(`❌ Automated solving failed again: ${automatedResult.error}`);
+      }
+      continue;
     } else {
       // Default behavior - wait for manual solving
       console.log('🔧 Please solve the CAPTCHA manually in the browser window.');
@@ -89,6 +151,9 @@ export const handleCaptchaLoop = async (page: Page, sessionInfo: SessionInfo): P
           console.log('   - Use "stealth" for advanced reload');
           console.log('   - Use "human" for behavior simulation');
           console.log('   - Use "skip" to bypass detection and continue');
+          if (captchaService) {
+            console.log('   - Use "auto" to retry automated solving');
+          }
         }
       }
     }
@@ -359,5 +424,57 @@ export const simulateHumanBehavior = async (page: Page): Promise<void> => {
     console.log('✅ Human behavior simulation complete');
   } catch (error) {
     console.log('⚠️ Human behavior simulation failed:', error);
+  }
+};
+
+/**
+ * Attempt automated CAPTCHA solving using the captcha service
+ */
+export const attemptAutomatedSolving = async (page: Page, captchaService: CaptchaService): Promise<AutomatedCaptchaResult> => {
+  try {
+    console.log('🤖 Starting automated CAPTCHA solving...');
+    const startTime = Date.now();
+    
+    // Use the service to auto-detect and solve
+    const result = await captchaService.autoSolvePage(page);
+    
+    if (result.success && result.solution) {
+      console.log('✅ CAPTCHA solution received, submitting...');
+      
+      // Determine captcha type for submission
+      const challenge = await captchaService.detectCaptchaChallenge(page);
+      const captchaType = challenge?.type || 'unknown';
+      
+      // Submit the solution
+      const submitted = await captchaService.submitSolution(page, result.solution, captchaType);
+      
+      if (submitted) {
+        return {
+          solved: true,
+          method: 'automated',
+          service: result.service as 'twocaptcha' | 'anticaptcha',
+          timeSpent: Date.now() - startTime
+        };
+      } else {
+        return {
+          solved: false,
+          method: 'automated',
+          error: 'Failed to submit solution to page'
+        };
+      }
+    } else {
+      return {
+        solved: false,
+        method: 'automated',
+        error: result.error || 'Unknown solving error'
+      };
+    }
+  } catch (error) {
+    console.log('❌ Automated solving error:', error);
+    return {
+      solved: false,
+      method: 'automated',
+      error: String(error)
+    };
   }
 };
