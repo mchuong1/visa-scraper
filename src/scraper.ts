@@ -62,187 +62,150 @@ const performHumanLikeMovements = async (page: Page): Promise<void> => {
 };
 
 /**
- * Check for appointment availability and navigate through months
+ * Check for appointment availability on the current page only (single check)
  */
 const checkAppointmentAvailability = async (page: Page): Promise<boolean> => {
-  console.log('🔍 Checking for appointment availability...');
+  console.log('🔍 Checking for appointment availability on current page...');
   
-  let monthsChecked = 0;
-  const maxMonthsToCheck = 12; // Safety limit to prevent infinite loops
-  
-  while (monthsChecked < maxMonthsToCheck) {
-    monthsChecked++;
+  try {
+    const slotElements = await page.$$('slot');
+    console.log(`🎰 Found ${slotElements.length} <slot> elements`);
     
-    // Check for actual appointment slots (the most reliable indicator)
-    console.log(`🔍 Checking for appointment availability (month ${monthsChecked})...`);
-    
-    try {
-      const slotElements = await page.$$('slot');
-      console.log(`🎰 Found ${slotElements.length} <slot> elements`);
+    // Check if slots have content (indicating available appointments)
+    let hasAvailableSlots = false;
+    for (const slot of slotElements) {
+      const slotContent = await slot.evaluate(el => {
+        // Check if slot has any content or child elements
+        return {
+          hasContent: el.innerHTML.trim().length > 0,
+          hasChildren: el.children.length > 0,
+          textContent: el.textContent?.trim() || '',
+          innerHTML: el.innerHTML.trim().substring(0, 200)
+        };
+      });
       
-      // Check if slots have content (indicating available appointments)
-      let hasAvailableSlots = false;
-      for (const slot of slotElements) {
-        const slotContent = await slot.evaluate(el => {
-          // Check if slot has any content or child elements
-          return {
-            hasContent: el.innerHTML.trim().length > 0,
-            hasChildren: el.children.length > 0,
-            textContent: el.textContent?.trim() || '',
-            innerHTML: el.innerHTML.trim().substring(0, 200)
-          };
-        });
-        
-        if (slotContent.hasContent || slotContent.hasChildren) {
-          hasAvailableSlots = true;
-          console.log(`🎯 Found slot with content: "${slotContent.innerHTML.substring(0, 100)}..."`);
-          break;
-        } else {
-          console.log(`🔍 Empty slot found`);
-        }
-      }
-      
-      if (hasAvailableSlots) {
-        console.log('🎉 APPOINTMENTS AVAILABLE! Found slots with content.');
-        console.log('✅ Stopping search - appointments detected!');
-        return true; // Return true when appointments are found
-      } else if (slotElements.length > 0) {
-        console.log('📅 Found slot elements but they appear to be empty - no appointments available.');
-        // Continue to next month check instead of returning false
+      if (slotContent.hasContent || slotContent.hasChildren) {
+        hasAvailableSlots = true;
+        console.log(`🎯 Found slot with content: "${slotContent.innerHTML.substring(0, 100)}..."`);
+        break;
       } else {
-        // No slot elements found - might be a different page structure or loading issue
-        console.log('⚠️ No <slot> elements found on this page.');
-        // Continue to next month check instead of waiting for user input
-      }
-      
-    } catch (error) {
-      console.log('Error checking for slot elements:', error);
-      // Continue to next month check instead of waiting for user input
-    }
-    
-    // Check if we've reached the unavailable month first
-    try {
-      const unavailableMonth = await page.$('a[data-testid="btn-next-month-unavailable"], p[data-testid="btn-next-month-unavailable"]');
-      if (unavailableMonth !== null) {
-        const monthText = await unavailableMonth.evaluate((el: Element) => el.textContent?.trim());
-        console.log(`🛑 Reached unavailable month: ${monthText}`);
-        console.log('❌ No available appointments found in any accessible month.');
-        return false; // Return false when reaching unavailable months
-      }
-    } catch (error) {
-      console.log('No unavailable month button found, continuing...');
-    }
-    
-    // Look for the next month button
-    console.log('Looking for next month button...');
-    
-    let nextMonthButton;
-    const nextMonthSelectors = [
-      'a[data-testid="btn-next-month-available"]', // Most specific - data-testid
-      'a[class*="MonthSelector_month-selector_button"][class*="--active"]', // Class pattern for active month selector
-      'a[href*="appointment-booking"][href*="month="]', // Href pattern with month parameter
-    ];
-    
-    // Also try to find next month button by looking for active month selectors
-    try {
-      const monthButtons = await page.$$('a[class*="MonthSelector_month-selector_button"]');
-      for (const button of monthButtons) {
-        const classList = await button.evaluate((el: Element) => el.className);
-        const isActive = classList.includes('--active') || classList.includes('MonthSelector_--active');
-        const isDisabled = classList.includes('--disabled') || classList.includes('MonthSelector_--disabled');
-        
-        if (isActive && !isDisabled) {
-          nextMonthButton = button;
-          console.log('✅ Found active month button');
-          break;
-        }
-      }
-    } catch (error) {
-      console.log('Error finding month buttons:', error);
-    }
-    
-    // Fallback to the selector-based approach
-    if (!nextMonthButton) {
-      for (const selector of nextMonthSelectors) {
-        try {
-          console.log(`Trying next month selector: ${selector}`);
-          nextMonthButton = await page.waitForSelector(selector, { visible: true, timeout: 3000 });
-          if (nextMonthButton) {
-            const monthText = await nextMonthButton.evaluate((el: Element) => el.textContent?.trim());
-            console.log(`✅ Found next month button with selector: ${selector} - ${monthText}`);
-            break;
-          }
-        } catch (error) {
-          console.log(`❌ Next month selector failed: ${selector}`);
-        }
+        console.log(`🔍 Empty slot found`);
       }
     }
     
-    if (!nextMonthButton) {
-      console.log('🛑 Could not find next month button. Checking if we\'ve reached the end...');
-      
-      // Check if there are any month selectors available at all
-      const allMonthButtons = await page.$$('a[class*="MonthSelector_month-selector_button"], p[class*="MonthSelector_month-selector_button"]');
-      const monthInfo = [];
-      
-      for (const button of allMonthButtons) {
-        const text = await button.evaluate((el: Element) => el.textContent?.trim());
-        const className = await button.evaluate((el: Element) => el.className);
-        const isDisabled = className.includes('--disabled') || await button.evaluate((el: Element) => el.tagName === 'P');
-        const testId = await button.evaluate((el: Element) => el.getAttribute('data-testid'));
-        monthInfo.push({ text, isDisabled, testId, className });
-      }
-      
-      console.log('Available month buttons:', monthInfo);
-      
-      if (monthInfo.some(m => m.isDisabled || m.testId === 'btn-next-month-unavailable')) {
-        console.log('📅 Reached end of available months.');
-        return false; // Return false when reaching end of available months
-      } else {
-        console.log('🛑 Unable to navigate to next month automatically. Please check manually.');
-        console.log('⏳ Navigate to the next month if available, then press ENTER...');
-        await waitForUserInput();
-        return false;
-      }
+    if (hasAvailableSlots) {
+      console.log('🎉 APPOINTMENTS AVAILABLE! Found slots with content.');
+      console.log('✅ Stopping search - appointments detected!');
+      return true; // Return true when appointments are found
+    } else if (slotElements.length > 0) {
+      console.log('📅 Found slot elements but they appear to be empty - no appointments available.');
+      return false;
     } else {
-      // Click the next month button
-      const monthText = await nextMonthButton.evaluate((el: Element) => el.textContent?.trim());
-      console.log(`🔄 Clicking next month button: ${monthText}`);
-      
-      await nextMonthButton.click();
-      
-      // Wait for the page to update
-      console.log('⏳ Waiting for month to change...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Wait for any navigation or content updates
-      try {
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 });
-      } catch (error) {
-        console.log('ℹ️ No navigation detected after clicking next month');
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Additional stabilization time
+      // No slot elements found - might be a different page structure or loading issue
+      console.log('⚠️ No <slot> elements found on this page.');
+      return false;
     }
-  }
-  
-  // If we exit the loop due to max months, return false
-  if (monthsChecked >= maxMonthsToCheck) {
-    console.log(`⚠️ Reached maximum month check limit (${maxMonthsToCheck}).`);
+    
+  } catch (error) {
+    console.log('Error checking for slot elements:', error);
     return false;
   }
+};
+
+/**
+ * Navigate to the next month if available
+ */
+const navigateToNextMonth = async (page: Page): Promise<boolean> => {
+  console.log('🔄 Attempting to navigate to next month...');
   
-  return false;
+  // Check if we've reached the unavailable month first
+  try {
+    const unavailableMonth = await page.$('a[data-testid="btn-next-month-unavailable"], p[data-testid="btn-next-month-unavailable"]');
+    if (unavailableMonth !== null) {
+      const monthText = await unavailableMonth.evaluate((el: Element) => el.textContent?.trim());
+      console.log(`🛑 Reached unavailable month: ${monthText}`);
+      console.log('❌ No more future months available.');
+      return false;
+    }
+  } catch (error) {
+    console.log('No unavailable month button found, continuing...');
+  }
+  
+  // Look for the next month button
+  console.log('Looking for next month button...');
+  
+  let nextMonthButton;
+  
+  // Try to find the actual next month button (not current/active month)
+  try {
+    // First, try the most specific selector for next month
+    nextMonthButton = await page.$('a[data-testid="btn-next-month-available"]');
+    if (nextMonthButton) {
+      const monthText = await nextMonthButton.evaluate((el: Element) => el.textContent?.trim());
+      console.log(`✅ Found next month button: ${monthText}`);
+    } else {
+      console.log('❌ No btn-next-month-available found');
+    }
+  } catch (error) {
+    console.log('Error finding next month button:', error);
+  }
+  
+  if (!nextMonthButton) {
+    console.log('🛑 Could not find next month button. Checking available month buttons...');
+    
+    // Check if there are any month selectors available at all
+    const allMonthButtons = await page.$$('a[class*="MonthSelector_month-selector_button"], p[class*="MonthSelector_month-selector_button"]');
+    const monthInfo = [];
+    
+    for (const button of allMonthButtons) {
+      const text = await button.evaluate((el: Element) => el.textContent?.trim());
+      const className = await button.evaluate((el: Element) => el.className);
+      const isDisabled = className.includes('--disabled') || await button.evaluate((el: Element) => el.tagName === 'P');
+      const testId = await button.evaluate((el: Element) => el.getAttribute('data-testid'));
+      monthInfo.push({ text, isDisabled, testId, className });
+    }
+    
+    console.log('Available month buttons:', monthInfo);
+    
+    if (monthInfo.some(m => m.isDisabled || m.testId === 'btn-next-month-unavailable')) {
+      console.log('📅 Reached end of available months.');
+      return false;
+    } else {
+      console.log('🛑 Unable to navigate to next month automatically.');
+      return false;
+    }
+  } else {
+    // Click the next month button
+    const monthText = await nextMonthButton.evaluate((el: Element) => el.textContent?.trim());
+    console.log(`🔄 Clicking next month button: ${monthText}`);
+    
+    await nextMonthButton.click();
+    
+    // Wait for the page to update
+    console.log('⏳ Waiting for month to change...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Wait for any navigation or content updates
+    try {
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 });
+    } catch (error) {
+      console.log('ℹ️ No navigation detected after clicking next month');
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Additional stabilization time
+    console.log('✅ Successfully navigated to next month');
+    return true;
+  }
 };
 
 /**
  * Continuously monitor for appointment availability
  */
 const monitorAppointments = async (page: Page): Promise<void> => {
-  console.log('🔄 Starting continuous appointment monitoring...');
+  console.log('🔄 Starting appointment monitoring...');
   
   while (true) {
-    // Check for appointments
+    // Check for appointments on current page
     const appointmentsFound = await checkAppointmentAvailability(page);
     
     if (appointmentsFound) {
@@ -251,24 +214,55 @@ const monitorAppointments = async (page: Page): Promise<void> => {
       break;
     }
     
-    console.log('📅 No appointments available. Will refresh and check again...');
+    console.log('📅 No appointments available on current page.');
     
-    // Perform human-like movements before waiting
+    // Give user options for what to do next
+    console.log('\n🤔 What would you like to do next?');
+    console.log('   1. Press ENTER to refresh current page and check again');
+    console.log('   2. Type "next" to try navigating to next month');
+    console.log('   3. Type "stop" to stop monitoring');
+    console.log('   4. Type "manual" to manually navigate to a different month');
+    
+    const readline = require('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    const choice = await new Promise<string>((resolve) => {
+      rl.question('⏳ Your choice: ', (answer: string) => {
+        rl.close();
+        resolve(answer.trim().toLowerCase());
+      });
+    });
+
+    if (choice === 'stop') {
+      console.log('🛑 Stopping monitoring as requested...');
+      break;
+    } else if (choice === 'next') {
+      console.log('🔄 Attempting to navigate to next month...');
+      const navigated = await navigateToNextMonth(page);
+      if (!navigated) {
+        console.log('❌ Could not navigate to next month. Please try manual navigation.');
+        continue;
+      }
+      // Wait for page to stabilize after navigation
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    } else if (choice === 'manual') {
+      console.log('🔧 Manual navigation mode:');
+      console.log('⏳ Please manually navigate to the month you want to check, then press ENTER...');
+      await waitForUserInput();
+    } else {
+      // Default: refresh current page
+      console.log('🔄 Refreshing current page...');
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      
+      // Wait for page to stabilize after refresh
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    
+    // Perform human-like movements before next check
     await performHumanLikeMovements(page);
-    
-    // Wait 5-8 minutes before refreshing and checking again
-    const waitTime = Math.floor(Math.random() * (8 - 5 + 1) + 5) * 60 * 1000; // 5-8 minutes in milliseconds
-    const nextRefreshTime = new Date(Date.now() + waitTime);
-    console.log(`⏰ Waiting ${Math.floor(waitTime / 60000)} minutes before next check...`);
-    console.log(`🕐 Next refresh scheduled at: ${nextRefreshTime.toLocaleString()}`);
-    await new Promise(resolve => setTimeout(resolve, waitTime));
-    
-    // Refresh the page to check again
-    console.log('🔄 Refreshing page to check for new appointments...');
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    
-    // Wait for page to stabilize after refresh
-    await new Promise(resolve => setTimeout(resolve, 3000));
   }
 };
 
