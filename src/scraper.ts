@@ -203,6 +203,8 @@ const navigateToNextMonth = async (page: Page): Promise<boolean> => {
  */
 const checkAllMonthsForAppointments = async (page: Page): Promise<boolean> => {
   console.log('🔄 Starting automatic month checking (TLS Contact: current + next 2 months)...');
+
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
   
   let monthsChecked = 0;
   const maxMonthsToCheck = 3; // TLS Contact only shows current month + next 2 months
@@ -249,14 +251,33 @@ const checkAllMonthsForAppointments = async (page: Page): Promise<boolean> => {
 };
 
 /**
- * Reset to the first month (current month) by refreshing the page
+ * Reset to the first month (current month) by navigating to URL with current month
  */
 const resetToFirstMonth = async (page: Page): Promise<void> => {
   console.log('🔄 Resetting to first month (current month)...');
   
   try {
-    // Refresh page to go back to current month
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+    // Get current date to construct the month parameter
+    const now = new Date();
+    const currentMonth = String(now.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
+    const currentYear = now.getFullYear();
+    const monthParam = `${currentMonth}-${currentYear}`;
+    
+    console.log(`📅 Current month parameter: ${monthParam}`);
+    
+    // Get the current URL and update just the month parameter
+    const currentUrl = page.url();
+    const url = new URL(currentUrl);
+    url.searchParams.set('month', monthParam);
+    
+    const resetUrl = url.toString();
+    console.log(`🎯 Navigating to: ${resetUrl}`);
+    
+    // Navigate to the URL with updated month parameter
+    await page.goto(resetUrl, { 
+      waitUntil: 'domcontentloaded', 
+      timeout: 30000 
+    });
     
     // Wait for page to stabilize
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -264,15 +285,28 @@ const resetToFirstMonth = async (page: Page): Promise<void> => {
     console.log('✅ Successfully reset to current month');
   } catch (error) {
     console.log('⚠️ Error resetting to first month:', error);
-    console.log('🔄 Trying alternative reset method...');
+    console.log('🔄 Trying page reload as fallback...');
     
-    // Alternative: navigate to the base URL
+    // Fallback: try page reload
     try {
-      await page.goto(page.url(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
       await new Promise(resolve => setTimeout(resolve, 3000));
-      console.log('✅ Reset completed using navigation');
-    } catch (navError) {
-      console.log('❌ Reset failed, continuing anyway:', navError);
+      console.log('✅ Reset completed using page reload');
+    } catch (reloadError) {
+      console.log('❌ Reset failed, continuing anyway:', reloadError);
+      
+      // Final fallback: navigate to the main appointment booking page
+      try {
+        console.log('🔄 Final fallback: navigating to main appointment page...');
+        await page.goto('https://visas-de.tlscontact.com/en-us/3447323/workflow/appointment-booking', {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000
+        });
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.log('✅ Reset completed using direct navigation');
+      } catch (finalError) {
+        console.log('❌ All reset methods failed:', finalError);
+      }
     }
   }
 };
@@ -285,36 +319,94 @@ const monitorAppointments = async (page: Page): Promise<void> => {
   console.log('ℹ️ TLS Contact shows current month + next 2 months only');
   
   while (true) {
-    // Check all 3 available months automatically
-    const appointmentsFound = await checkAllMonthsForAppointments(page);
-    
-    if (appointmentsFound) {
-      console.log('🎉 APPOINTMENTS FOUND! Stopping monitoring.');
-      await waitForUserInput(); // Wait for user to proceed with booking
-      break;
+    try {
+      // Check if page is still valid (browser might have been restarted)
+      try {
+        await page.evaluate(() => document.title);
+      } catch (pageError) {
+        console.log('🔄 Browser session appears to have been restarted during monitoring');
+        console.log('💀 Page is no longer valid, throwing error to trigger restart');
+        throw new Error('Browser session restarted - page invalidated');
+      }
+
+      // Check all 3 available months automatically
+      const appointmentsFound = await checkAllMonthsForAppointments(page);
+      
+      if (appointmentsFound) {
+        console.log('🎉 APPOINTMENTS FOUND! Stopping monitoring.');
+        await waitForUserInput(); // Wait for user to proceed with booking
+        break;
+      }
+      
+      console.log('📅 No appointments found in any of the 3 available months.');
+      
+      // Reset back to first month before waiting
+      await resetToFirstMonth(page);
+      
+      // Wait before starting the next cycle
+      console.log('⏳ Waiting 5 minutes before checking all months again...');
+      const waitTime = ((Math.random() * 5) + 3) * 60 * 1000; // 5 minutes
+      const nextCheckTime = new Date(Date.now() + waitTime);
+      console.log(`🕐 Next check cycle at: ${nextCheckTime.toLocaleString()}`);
+      
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      
+      console.log('🔄 Starting new monitoring cycle...');
+    } catch (error) {
+      console.log('❌ Error in monitoring loop:', (error as Error).message);
+      
+      // If it's a browser restart error, let it propagate to trigger restart
+      if ((error as Error).message.includes('Browser session restarted') || 
+          (error as Error).message.includes('Protocol error') ||
+          (error as Error).message.includes('Target closed') ||
+          (error as Error).message.includes('Execution context was destroyed')) {
+        console.log('🔄 Browser restart detected, propagating error for restart...');
+        throw error;
+      }
+      
+      // For other errors, wait and continue
+      console.log('⏳ Waiting 30 seconds before retrying monitoring...');
+      await new Promise(resolve => setTimeout(resolve, 30000));
     }
-    
-    console.log('📅 No appointments found in any of the 3 available months.');
-    
-    // Reset back to first month before waiting
-    await resetToFirstMonth(page);
-    
-    // Wait before starting the next cycle
-    console.log('⏳ Waiting 5 minutes before checking all months again...');
-    const waitTime = 5 * 60 * 1000; // 5 minutes
-    const nextCheckTime = new Date(Date.now() + waitTime);
-    console.log(`🕐 Next check cycle at: ${nextCheckTime.toLocaleString()}`);
-    
-    await new Promise(resolve => setTimeout(resolve, waitTime));
-    
-    console.log('🔄 Starting new monitoring cycle...');
   }
 };
 
 /**
  * Main TLS Contact scraping function
  */
-export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Promise<void> => {
+export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo, resumeMonitoring: boolean = false): Promise<void> => {
+  // If resumeMonitoring is true, skip the initial setup and go straight to monitoring
+  if (resumeMonitoring) {
+    console.log('🔄 Resuming appointment monitoring after browser restart...');
+    
+    try {
+      // Try to navigate to the appointment booking page directly
+      console.log('🔄 Navigating to appointment booking page...');
+      await page.goto('https://visas-de.tlscontact.com/en-us/3447323/workflow/appointment-booking', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for page to stabilize
+      
+      // Check if we're logged in by looking for expected elements
+      const isLoggedIn = await page.$('#my-application') || 
+                        await page.$('.my-application') ||
+                        await page.$('[data-testid="btn-select-group"]') ||
+                        await page.$('button[name="formGroupId"]');
+      
+      if (isLoggedIn) {
+        console.log('✅ Session appears to be still valid, proceeding to monitoring...');
+        await monitorAppointments(page);
+        return;
+      } else {
+        console.log('⚠️ Session appears to be invalid, falling back to full login process...');
+      }
+    } catch (error) {
+      console.log('⚠️ Resume attempt failed, falling back to full login process:', (error as Error).message);
+    }
+  }
+
   const maxRetries = 3;
   let attempt = 0;
   
@@ -398,22 +490,78 @@ export const scrapeTLSContact = async (page: Page, sessionInfo: SessionInfo): Pr
     
     // Look for "My application" div which indicates user is already logged in
     const myApplicationSelectors = [
-      'div#my-application',
-      'div[class*="cursor-pointer"]:contains("My application")',
-      'div:contains("My application")'
+      '#my-application', // Most specific - ID selector based on captured info
+      'div#my-application', // Div with ID
+      'div.cursor-pointer.whitespace-nowrap', // Key classes that identify the element
+      'div[class*="cursor-pointer"][class*="text-primary-500"]', // Generic approach with key classes
+      'div[class*="cursor-pointer"][class*="whitespace-nowrap"]', // Broader class combination
+      'div.cursor-pointer', // Even more general cursor-pointer class
+      '[data-testid*="my-application"]', // Test ID attribute
+      'div[role="button"]:contains("My application")', // Role-based selector with text
+      'a[href*="application"]', // Link-based approach
+      'button:contains("My application")', // Button variation
     ];
     
     let myApplicationDiv;
     for (const selector of myApplicationSelectors) {
       try {
         console.log(`Trying My application selector: ${selector}`);
-        myApplicationDiv = await page.$(selector);
-        if (myApplicationDiv) {
-          console.log(`✅ Found "My application" with selector: ${selector}`);
-          break;
+        const element = await page.$(selector);
+        if (element) {
+          // Verify this is actually the "My application" element by checking text content
+          const textContent = await element.evaluate((el: Element) => el.textContent?.trim());
+          if (textContent === 'My application') {
+            console.log(`✅ Found "My application" with selector: ${selector}`);
+            myApplicationDiv = element;
+            break;
+          } else {
+            console.log(`❌ Found element but text is "${textContent}", not "My application"`);
+          }
         }
       } catch (error) {
-        console.log(`❌ My application selector failed: ${selector}`);
+        console.log(`❌ My application selector failed: ${selector}:`, error);
+      }
+    }
+    
+    // Fallback: search all divs and filter by text content
+    if (!myApplicationDiv) {
+      try {
+        console.log('🔍 Fallback: searching for "My application" by text content...');
+        const allDivs = await page.$$('div');
+        for (const div of allDivs) {
+          const textContent = await div.evaluate((el: Element) => el.textContent?.trim());
+          const classList = await div.evaluate((el: Element) => el.className);
+          
+          // Check for exact match first
+          if (textContent === 'My application' && classList.includes('cursor-pointer')) {
+            myApplicationDiv = div;
+            console.log('✅ Found "My application" using text-based fallback (exact match)');
+            break;
+          }
+          
+          // Then check for partial match (case insensitive)
+          if (textContent && textContent.toLowerCase().includes('my application') && classList.includes('cursor-pointer')) {
+            myApplicationDiv = div;
+            console.log('✅ Found "My application" using text-based fallback (partial match)');
+            break;
+          }
+        }
+        
+        // Final fallback: search all clickable elements (buttons, links, divs)
+        if (!myApplicationDiv) {
+          console.log('🔍 Final fallback: searching all clickable elements...');
+          const clickableElements = await page.$$('button, a, div[role="button"], [onclick], .cursor-pointer');
+          for (const element of clickableElements) {
+            const textContent = await element.evaluate((el: Element) => el.textContent?.trim());
+            if (textContent && textContent.toLowerCase().includes('my application')) {
+              myApplicationDiv = element;
+              console.log('✅ Found "My application" using final fallback');
+              break;
+            }
+          }
+        }
+      } catch (error) {
+        console.log('❌ Text-based fallback failed:', error);
       }
     }
     if (myApplicationDiv) {
