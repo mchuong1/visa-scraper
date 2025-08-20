@@ -2,7 +2,7 @@
 
 import { Page } from 'puppeteer';
 import { Solver as TwoCaptchaSolver } from '2captcha';
-import * as anticaptcha from 'anticaptcha';
+import anticaptcha from 'anticaptcha';
 
 export interface CaptchaServiceConfig {
   twoCaptchaApiKey?: string;

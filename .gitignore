@@ -3,3 +3,4 @@ build
 .cache
 .env
 .last-run-timestamp
+session-data.json
