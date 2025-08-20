@@ -55,6 +55,7 @@ import { scrapeTLSContact } from './scraper';
 
     // Main scraping loop with browser lifecycle management
     let sessionCount = 0;
+    let isAutoRestart = false; // Track if this is an automatic restart
     const maxSessions = 50; // Prevent infinite loops
 
     while (sessionCount < maxSessions) {
@@ -64,18 +65,27 @@ import { scrapeTLSContact } from './scraper';
       try {
         // Launch or restart browser if needed
         let session = browserManager.getCurrentSession();
+        let wasRestarted = false;
+        
         if (!session || browserManager.shouldRestart()) {
+          console.log(isAutoRestart ? '🔄 Auto-restarting browser due to lifecycle management...' : '🚀 Launching new browser session...');
           session = await browserManager.restartBrowser();
+          wasRestarted = true;
         }
 
         // Save session data before starting scraping
         await browserManager.saveSessionData();
 
         // Start scraping with current session
-        await scrapeTLSContact(session.page, session.sessionInfo);
+        // If this is an auto-restart and browser was restarted, try to resume monitoring
+        const shouldResumeMonitoring = isAutoRestart && wasRestarted;
+        await scrapeTLSContact(session.page, session.sessionInfo, shouldResumeMonitoring);
 
         // Session completed successfully
         console.log('\n🎉 Scraping session completed successfully!');
+        
+        // Reset auto-restart flag since we completed successfully
+        isAutoRestart = false;
         
         // Show session summary
         console.log('\n📊 Session Summary:');
@@ -112,10 +122,26 @@ import { scrapeTLSContact } from './scraper';
         } else if (choice === 'restart') {
           console.log('🔄 Restarting browser as requested...');
           await browserManager.restartBrowser();
+          isAutoRestart = false; // Manual restart, do full setup
         }
 
       } catch (error) {
         console.error(`❌ Error in session #${sessionCount}:`, error);
+        
+        // Check if this is a browser restart-related error
+        const errorMessage = (error as Error).message;
+        const isBrowserRestartError = errorMessage.includes('Browser session restarted') || 
+                                    errorMessage.includes('Protocol error') ||
+                                    errorMessage.includes('Target closed') ||
+                                    errorMessage.includes('Execution context was destroyed');
+        
+        if (isBrowserRestartError) {
+          console.log('🔄 Browser restart detected during monitoring, setting auto-restart flag...');
+          isAutoRestart = true;
+        } else {
+          console.log('❌ Non-restart error occurred, will do full setup on retry...');
+          isAutoRestart = false;
+        }
         
         // Increment error count
         const currentSession = browserManager.getCurrentSession();
