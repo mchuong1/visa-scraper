@@ -139,7 +139,7 @@ console.log(`🖥️ User Agent: ${sessionInfo.userAgent}`);
 
   try {
     // Start scraping
-    await scrapeTLSContact(page, sessionInfo);
+    await scrapeTLSContact(page, sessionInfo, false); // false = don't resume monitoring, do full setup
 
     // Session summary
     console.log('\n🏁 Clean Run Session Summary:');
