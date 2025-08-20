@@ -41,7 +41,7 @@ export class BrowserManager {
   private session: BrowserSession | null = null;
   private sessionDataPath: string;
   private maxSessionDuration: number = 45 * 60 * 1000; // 45 minutes in ms
-  private memoryThreshold: number = 1024 * 1024 * 1024; // 1GB in bytes
+  private memoryThreshold: number = 1024 * 1024 * 1024 * 5; // 1GB in bytes
   private watchdogInterval: NodeJS.Timeout | null = null;
   private memoryCheckInterval: NodeJS.Timeout | null = null;
 
@@ -226,84 +226,25 @@ export class BrowserManager {
 
       const cookies = await this.session.page.cookies();
       
-      // Test storage access first
-      const storageAccess = await this.testStorageAccess(this.session.page);
-      console.log(`🔍 Storage access: localStorage=${storageAccess.localStorage}, sessionStorage=${storageAccess.sessionStorage}`);
-      
-      // Safely try to get localStorage and sessionStorage with enhanced fallbacks
-      let localStorageData = {};
-      let sessionStorageData = {};
-      
-      if (storageAccess.localStorage || storageAccess.sessionStorage) {
-        try {
-          const [localStorage, sessionStorage] = await this.session.page.evaluate((): [string, string] => {
-            try {
-              // Check if storage objects exist and are accessible
-              if (typeof window === 'undefined' || !window.localStorage) {
-                return ['{}', '{}'];
-              }
-              
-              // Try to access localStorage and sessionStorage
-              const localData: Record<string, any> = {};
-              const sessionData: Record<string, any> = {};
-              
-              // Extract localStorage items safely
-              try {
-                for (let i = 0; i < window.localStorage.length; i++) {
-                  const key = window.localStorage.key(i);
-                  if (key) {
-                    localData[key] = window.localStorage.getItem(key);
-                  }
-                }
-              } catch (localError) {
-                // Ignore localStorage access errors
-              }
-              
-              // Extract sessionStorage items safely
-              try {
-                for (let i = 0; i < window.sessionStorage.length; i++) {
-                  const key = window.sessionStorage.key(i);
-                  if (key) {
-                    sessionData[key] = window.sessionStorage.getItem(key);
-                  }
-                }
-              } catch (sessionError) {
-                // Ignore sessionStorage access errors
-              }
-              
-              return [
-                JSON.stringify(localData),
-                JSON.stringify(sessionData)
-              ];
-            } catch (e) {
-              // Ultimate fallback for any security restrictions
-              return ['{}', '{}'];
-            }
-          });
-          
-          localStorageData = JSON.parse(localStorage);
-          sessionStorageData = JSON.parse(sessionStorage);
-          console.log('📦 Storage data extracted successfully');
-        } catch (storageError) {
-          console.log('⚠️ Storage access restricted, saving cookies only:', storageError instanceof Error ? storageError.message : String(storageError));
-          // Continue with empty storage data if there's any error
-        }
-      } else {
-        console.log('⚠️ Storage not accessible, saving cookies only');
-      }
+      const [localStorage, sessionStorage] = await this.session.page.evaluate((): [string, string] => {
+        return [
+          JSON.stringify(localStorage),
+          JSON.stringify(sessionStorage)
+        ];
+      });
 
       const sessionData: SessionData = {
         cookies,
-        localStorage: localStorageData,
-        sessionStorage: sessionStorageData,
+        localStorage: JSON.parse(localStorage),
+        sessionStorage: JSON.parse(sessionStorage),
         userAgent: this.session.sessionInfo.userAgent,
         timestamp: Date.now()
       };
 
       await fs.writeFile(this.sessionDataPath, JSON.stringify(sessionData, null, 2));
-      console.log(`✅ Session data saved (${cookies.length} cookies, ${Object.keys(localStorageData).length} localStorage items)`);
+      console.log('✅ Session data saved');
     } catch (error) {
-      console.log('⚠️ Failed to save session data:', error instanceof Error ? error.message : String(error));
+      console.log('⚠️ Failed to save session data:', error);
     }
   }
 
@@ -337,109 +278,29 @@ export class BrowserManager {
     try {
       console.log('🔄 Restoring session data...');
 
-      // Set cookies first (most important for maintaining sessions)
+      // Set cookies
       if (sessionData.cookies.length > 0) {
         await page.setCookie(...sessionData.cookies);
         console.log(`🍪 Restored ${sessionData.cookies.length} cookies`);
       }
 
-      // Test storage access before attempting to restore
-      const storageAccess = await this.testStorageAccess(page);
-      console.log(`🔍 Storage access for restore: localStorage=${storageAccess.localStorage}, sessionStorage=${storageAccess.sessionStorage}`);
-
-      // Only attempt to restore storage if it's accessible
-      if (storageAccess.localStorage || storageAccess.sessionStorage) {
-        // Safely restore localStorage and sessionStorage with enhanced error handling
-        await page.evaluateOnNewDocument((data: SessionData) => {
-          try {
-            // Wait for page to be ready before accessing storage
-            if (typeof window === 'undefined') {
-              return;
-            }
-            
-            // Restore localStorage if available and accessible
-            if (data.localStorage && typeof window.localStorage !== 'undefined') {
-              Object.keys(data.localStorage).forEach(key => {
-                try {
-                  if (data.localStorage[key] !== null && data.localStorage[key] !== undefined) {
-                    window.localStorage.setItem(key, data.localStorage[key]);
-                  }
-                } catch (e) {
-                  // Ignore individual localStorage errors (quota exceeded, security, etc.)
-                }
-              });
-            }
-            
-            // Restore sessionStorage if available and accessible
-            if (data.sessionStorage && typeof window.sessionStorage !== 'undefined') {
-              Object.keys(data.sessionStorage).forEach(key => {
-                try {
-                  if (data.sessionStorage[key] !== null && data.sessionStorage[key] !== undefined) {
-                    window.sessionStorage.setItem(key, data.sessionStorage[key]);
-                  }
-                } catch (e) {
-                  // Ignore individual sessionStorage errors (quota exceeded, security, etc.)
-                }
-              });
-            }
-          } catch (e) {
-            // Ignore all storage access errors in restricted contexts
-          }
-        }, sessionData);
-      } else {
-        console.log('⚠️ Storage not accessible, skipping storage restoration');
-      }
-
-      const localStorageCount = Object.keys(sessionData.localStorage || {}).length;
-      const sessionStorageCount = Object.keys(sessionData.sessionStorage || {}).length;
-      console.log(`✅ Session data restored (${localStorageCount} localStorage, ${sessionStorageCount} sessionStorage items)`);
-    } catch (error) {
-      console.log('⚠️ Failed to restore session data:', error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  /**
-   * Test if localStorage is accessible on the current page
-   */
-  async testStorageAccess(page: Page): Promise<{ localStorage: boolean; sessionStorage: boolean }> {
-    try {
-      const result = await page.evaluate(() => {
-        const testKey = '__storage_test__';
-        let localStorageAccessible = false;
-        let sessionStorageAccessible = false;
-        
-        // Test localStorage
-        try {
-          if (typeof window !== 'undefined' && window.localStorage) {
-            window.localStorage.setItem(testKey, 'test');
-            window.localStorage.removeItem(testKey);
-            localStorageAccessible = true;
-          }
-        } catch (e) {
-          localStorageAccessible = false;
+      // Restore localStorage and sessionStorage
+      await page.evaluateOnNewDocument((data: SessionData) => {
+        if (data.localStorage) {
+          Object.keys(data.localStorage).forEach(key => {
+            localStorage.setItem(key, data.localStorage[key]);
+          });
         }
-        
-        // Test sessionStorage
-        try {
-          if (typeof window !== 'undefined' && window.sessionStorage) {
-            window.sessionStorage.setItem(testKey, 'test');
-            window.sessionStorage.removeItem(testKey);
-            sessionStorageAccessible = true;
-          }
-        } catch (e) {
-          sessionStorageAccessible = false;
+        if (data.sessionStorage) {
+          Object.keys(data.sessionStorage).forEach(key => {
+            sessionStorage.setItem(key, data.sessionStorage[key]);
+          });
         }
-        
-        return {
-          localStorage: localStorageAccessible,
-          sessionStorage: sessionStorageAccessible
-        };
-      });
-      
-      return result;
+      }, sessionData);
+
+      console.log('✅ Session data restored');
     } catch (error) {
-      console.log('⚠️ Storage access test failed:', error instanceof Error ? error.message : String(error));
-      return { localStorage: false, sessionStorage: false };
+      console.log('⚠️ Failed to restore session data:', error);
     }
   }
 
@@ -452,9 +313,13 @@ export class BrowserManager {
     }
 
     this.watchdogInterval = setInterval(async () => {
-      if (this.shouldRestart()) {
-        console.log('🐕 Watchdog triggered browser restart');
-        await this.restartBrowser();
+      try {
+        if (this.shouldRestart()) {
+          console.log('🐕 Watchdog triggered browser restart');
+          await this.restartBrowser();
+        }
+      } catch (error) {
+        console.log('⚠️ Error in watchdog process:', error);
       }
     }, 5 * 60 * 1000); // Check every 5 minutes
 
@@ -471,14 +336,22 @@ export class BrowserManager {
 
     this.memoryCheckInterval = setInterval(async () => {
       if (this.session) {
-        const memoryUsage = await this.getBrowserMemoryUsage();
-        this.session.memoryUsage = memoryUsage;
-        
-        const memoryMB = Math.round(memoryUsage / 1024 / 1024);
-        const thresholdMB = Math.round(this.memoryThreshold / 1024 / 1024);
-        
-        if (memoryMB > thresholdMB * 0.8) { // Warn at 80% threshold
-          console.log(`⚠️ High memory usage: ${memoryMB}MB (threshold: ${thresholdMB}MB)`);
+        try {
+          const memoryUsage = await this.getBrowserMemoryUsage();
+          
+          // Double-check session still exists (race condition protection)
+          if (this.session) {
+            this.session.memoryUsage = memoryUsage;
+            
+            const memoryMB = Math.round(memoryUsage / 1024 / 1024);
+            const thresholdMB = Math.round(this.memoryThreshold / 1024 / 1024);
+            
+            if (memoryMB > thresholdMB * 0.8) { // Warn at 80% threshold
+              console.log(`⚠️ High memory usage: ${memoryMB}MB (threshold: ${thresholdMB}MB)`);
+            }
+          }
+        } catch (error) {
+          console.log('⚠️ Error during memory monitoring:', error);
         }
       }
     }, 60 * 1000); // Check every minute
